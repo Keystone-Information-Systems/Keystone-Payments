@@ -1,0 +1,57 @@
+# ValPay Frontend - AI Assistant Rules
+
+## Project Overview
+This is a React/TypeScript frontend for ValPay, a payment processing application with Adyen integration.
+
+## Code Style & Standards
+- Use TypeScript for all new code
+- Follow React best practices with functional components and hooks
+- Use Material-UI (MUI) components for UI elements
+- Follow the existing file structure in src/
+- Use Tailwind CSS for styling alongside MUI
+- Prefer composition over inheritance
+
+## Payment Integration Guidelines
+- Always use the existing Adyen integration patterns
+- Follow the payment flow defined in the services/paymentService.ts
+- Maintain error handling for all payment operations
+- Use the existing type definitions in types/ directory
+
+## File Organization
+- Components go in src/components/
+- Pages go in src/pages/
+- Services go in src/services/
+- Types go in src/types/
+- Utils go in src/utils/
+- Stores go in src/stores/
+
+## Testing
+- Write tests for new components and services
+- Use the existing test setup in src/test/
+- Follow the testing patterns in the project
+
+## Security
+- Never hardcode API keys or sensitive data
+- Use environment variables for configuration
+- Validate all user inputs
+- Follow payment security best practices
+
+## Performance
+- Use React.memo for expensive components
+- Implement proper loading states
+- Optimize bundle size
+- Use lazy loading where appropriate
+
+## Error Handling
+- Always provide user-friendly error messages
+- Use the ErrorBoundary component for error catching
+- Log errors appropriately for debugging
+
+# Editing policy
+- Do not modify files unless the user explicitly says: "apply", "make the change", or "update X".
+- By default, propose changes as a diff/steps only.
+
+# Answer style
+- Keep replies brief (bullets or ≤5 lines).
+- Include concrete commands/snippets when helpful.
+- Use Adyen docs for the advanced flow to check if this solution fits their standards

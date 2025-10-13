@@ -1,0 +1,11 @@
+{
+  "framework": "net8.0",
+  "function-runtime": "dotnet8",
+  "function-memory-size": 512,
+  "function-timeout": 30,
+  "function-handler": "ValPay.Api",
+  "function-name": "valpay-api-dev",
+  "profile": "KIS-Dev-Engineer-244706281753",
+  "region": "eu-west-1"
+}
+

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Adyen" Version="10.*" />
+    <PackageReference Include="Amazon.Lambda.Core" Version="2.*" />
+    <PackageReference Include="Amazon.Lambda.APIGatewayEvents" Version="2.*" />
+    <PackageReference Include="Dapper" Version="2.*" />
+    <PackageReference Include="Npgsql" Version="8.*" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ValPay.Domain\ValPay.Domain.csproj" />
+    <ProjectReference Include="..\ValPay.Application\ValPay.Application.csproj" />
+    <ProjectReference Include="..\ValPay.Infrastructure\ValPay.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
+

@@ -1,0 +1,34 @@
+# Root ignores for ValPay mono-repo
+
+# Env files
+.env
+*.env
+*.env.*.local
+ValPay-Frontend/.env
+ValPay-Frontend/.env.*
+
+# Backend local-only configs (not tracked)
+ValPay-Backend/src/**/appsettings.*.local.json
+ValPay-Backend/src/**/secrets*.json
+
+# Node / Frontend
+ValPay-Frontend/node_modules/
+ValPay-Frontend/dist/
+ValPay-Frontend/.vite/
+ValPay-Frontend/.cache/
+ValPay-Frontend/.turbo/
+
+# .NET build output
+ValPay-Backend/**/bin/
+ValPay-Backend/**/obj/
+ValPay-Backend/.vs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+
