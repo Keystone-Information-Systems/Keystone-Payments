@@ -49,12 +49,12 @@ export default function NewPaymentPage() {
     );
   }
 
-  const { paymentMethods, reference, amount, countryCode, lineItems = [], username, email } = data;
+  const { paymentMethods, reference, amount, countryCode, lineItems = [], username, email, transactionId } = data;
   const itemsTotalMinor = lineItems.reduce((sum: number, li: any) => sum + (li?.amountValue ?? 0), 0);
   const holderNameError = !holderName.trim();
   const showError = showNameWarning && holderNameError;
 
-  const existingTransactionId = (new URLSearchParams(location.search).get('transactionId') || (data as any)?.transactionId || undefined) as string | undefined;
+  const existingTransactionId = transactionId as string | undefined;
 
   return (
     <div className="max-w-2xl mx-auto p-6">

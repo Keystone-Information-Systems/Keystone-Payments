@@ -1,8 +1,9 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UserSecretsId>10e3b97c-c362-45cd-b0f8-d975c8590a86</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Adyen" Version="10.*" />

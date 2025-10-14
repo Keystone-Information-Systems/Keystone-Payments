@@ -94,9 +94,9 @@ app.MapPost("/payments/{id:guid}/cancel", async (Guid id, Db db, ILogger<Program
     {
         using var c = db.Open();
 
-        // Get transaction details
-        var transaction = await c.QuerySingleOrDefaultAsync<dynamic>("""
-            select transactionId, status::text as status 
+        // Get transaction details including tenantId
+        var transaction = await c.QuerySingleOrDefaultAsync<(Guid TransactionId, string Status, Guid TenantId)?>("""
+            select transactionId, status::text as status, tenantid
             from transactions 
             where transactionId=@id
             """, new { id });
@@ -108,7 +108,7 @@ app.MapPost("/payments/{id:guid}/cancel", async (Guid id, Db db, ILogger<Program
         }
 
         // Check if already cancelled
-        if (transaction.status == "Cancelled")
+        if (transaction.Value.Status == "Cancelled")
         {
             logger.LogWarning("Transaction {TransactionId} is already cancelled. CorrelationId: {CorrelationId}", id, correlationId);
             return Results.BadRequest(new { message = "Transaction is already cancelled" });
@@ -125,7 +125,7 @@ app.MapPost("/payments/{id:guid}/cancel", async (Guid id, Db db, ILogger<Program
 
         // Create operation record
         var operationId = Guid.NewGuid();
-        var tenantId = Guid.Parse(app.Configuration["Tenant:Id"] ?? "00000000-0000-0000-0000-000000000001");
+        var tenantId = transaction.Value.TenantId;
 
         await c.ExecuteAsync("""
             insert into operations(operationId, transactionId, tenantId, pspReference, operationType, status, amountValue, currencyCode, rawPayload)
@@ -342,6 +342,10 @@ app.MapPost("/getpaymentMethods", async (Db db, HttpContext ctx, CancellationTok
         {
             return Results.NotFound(new { message = "No transaction found for the provided orderId" });
         }
+        if (data.TransactionId == Guid.Empty)
+        {
+            return Results.BadRequest(new { message = "TransactionId is required for cancellation" });
+        }
 
         if (data.AmountValue is null)
         {
@@ -366,6 +370,7 @@ app.MapPost("/getpaymentMethods", async (Db db, HttpContext ctx, CancellationTok
                 : Array.Empty<object>();
             var emptyResponse = new
             {
+                transactionId = data.TransactionId,
                 paymentMethods = new object[] { },
                 sessionId = Guid.NewGuid().ToString(),
                 reference = data.Reference,
@@ -386,6 +391,7 @@ app.MapPost("/getpaymentMethods", async (Db db, HttpContext ctx, CancellationTok
             : Array.Empty<object>();
         var response = new
         {
+            transactionId = data.TransactionId,
             paymentMethods = data.PaymentMethods,
             sessionId = Guid.NewGuid().ToString(),
             reference = data.Reference,

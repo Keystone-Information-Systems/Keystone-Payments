@@ -14,6 +14,7 @@ public sealed class Db(string connStr)
     public IDbConnection Open() => new NpgsqlConnection(connStr);
     
     public sealed record PaymentData(
+        Guid TransactionId,
         object? PaymentMethods,
         string? SessionId,
         string Reference,
@@ -294,6 +295,7 @@ public sealed class Db(string connStr)
             var lineItems = await GetLineItemsAsync(txRow.TransactionId, ct);
 
             return new PaymentData(
+                txRow.TransactionId,
                 paymentMethods,
                 sessionId,
                 orderId,

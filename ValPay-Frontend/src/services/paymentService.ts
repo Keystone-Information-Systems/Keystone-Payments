@@ -7,6 +7,7 @@ export const schemas = {
     paymentMethods: z.any(),
     sessionId: z.string(),
     reference: z.string(),
+    transactionId: z.string().optional(),
     amount: z.object({ value: z.number().int().positive(), currency: z.string().length(3) }),
     countryCode: z.string().length(2),
     lineItems: z.array(
