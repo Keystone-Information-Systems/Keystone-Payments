@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getPaymentMethods, cancelPayment } from '@/services/paymentService';
+import { getPaymentMethods, cancelPayment, estimatePaymentCost } from '@/services/paymentService';
 import AdyenDropin from '@/components/payment/AdyenDropin';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { formatCurrency } from '@/utils/formatters';
@@ -19,6 +19,9 @@ export default function NewPaymentPage() {
   const [showNameWarning, setShowNameWarning] = useState<boolean>(false);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  // Surcharge-related state must be declared before any early returns to keep hook order stable
+  const [surchargeMinor, setSurchargeMinor] = useState<number>(0);
+  const [estimating, setEstimating] = useState<boolean>(false);
 
   useEffect(() => {
     if (!orderId) navigate('/'); // prevent loops via router config
@@ -51,10 +54,12 @@ export default function NewPaymentPage() {
 
   const { paymentMethods, reference, amount, countryCode, lineItems = [], username, email, transactionId } = data;
   const itemsTotalMinor = lineItems.reduce((sum: number, li: any) => sum + (li?.amountValue ?? 0), 0);
+  const baseTotalMinor = amount?.value ?? itemsTotalMinor;
+  const totalToPayMinor = baseTotalMinor + surchargeMinor;
   const holderNameError = !holderName.trim();
   const showError = showNameWarning && holderNameError;
 
-  const existingTransactionId = transactionId as string | undefined;
+  const existingTransactionId = transactionId as string;
 
   return (
     <div className="max-w-2xl mx-auto p-6">
@@ -103,7 +108,7 @@ export default function NewPaymentPage() {
               <Typography variant="h6">Items</Typography>
             </Box>
             <Typography variant="subtitle1" className="font-semibold">
-              {formatCurrency(itemsTotalMinor, amount.currency)}
+              {formatCurrency(totalToPayMinor, amount.currency)}
             </Typography>
           </Box>
           <Divider className="my-2" />
@@ -120,6 +125,23 @@ export default function NewPaymentPage() {
                 />
               </ListItem>
             ))}
+          </List>
+          <Divider className="my-2" />
+          <List dense>
+            <ListItem
+              secondaryAction={
+                <Box sx={{ minWidth: 140, textAlign: 'right' }}>
+                  <Typography variant="body2">
+                    {formatCurrency(surchargeMinor, amount.currency)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {surchargeMinor === 0 && !estimating ? 'Will be calculated after card number' : estimating ? 'Estimating…' : ''}
+                  </Typography>
+                </Box>
+              }
+            >
+              <ListItemText primary="Surcharge fee" />
+            </ListItem>
           </List>
         </Paper>
       )}
@@ -190,6 +212,21 @@ export default function NewPaymentPage() {
         onError={(e) => {
             console.error('Adyen error', e);
             navigate('/payment/error?reason=failed');
+        }}
+        onEncryptedCardNumber={async (encryptedCardNumber) => {
+            setEstimating(true);
+            try {
+              const res = await estimatePaymentCost({
+                amount,
+                encryptedCardNumber,
+                reference,
+                shopperCountry: countryCode,
+                transactionId: existingTransactionId
+              });
+              setSurchargeMinor(res.surchargeAmount ?? 0);
+            } finally {
+              setEstimating(false);
+            }
         }}
       />
     </div>

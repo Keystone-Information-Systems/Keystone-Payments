@@ -38,6 +38,11 @@ export const schemas = {
   cancelRes: z.object({
     message: z.string().optional(),
     transactionId: z.string().optional()
+  }),
+  costEstimateRes: z.object({
+    surchargeAmount: z.number().int().nonnegative().default(0),
+    totalWithSurcharge: z.number().int().positive(),
+    breakdown: z.any().optional()
   })
 };
 
@@ -129,4 +134,26 @@ export async function cancelPayment(transactionId: string) {
   });
   if (!res.ok) throw new Error(`cancel ${res.status}`);
   return schemas.cancelRes.parse(await res.json());
+}
+
+export async function estimatePaymentCost(args: {
+  amount: { value: number; currency: string };
+  encryptedCardNumber: string;
+  reference: string;
+  shopperCountry: string;
+  transactionId: string;
+}) {
+  const res = await fetch(`${API}/payments/cost-estimate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      amount: args.amount,
+      encryptedCardNumber: args.encryptedCardNumber,
+      reference: args.reference,
+      shopperCountry: args.shopperCountry,
+      transactionId: args.transactionId
+    })
+  });
+  if (!res.ok) throw new Error(`cost-estimate ${res.status}`);
+  return schemas.costEstimateRes.parse(await res.json());
 }

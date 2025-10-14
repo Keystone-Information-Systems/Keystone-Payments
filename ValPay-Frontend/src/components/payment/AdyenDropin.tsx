@@ -13,6 +13,7 @@ type Props = {
   onRequireHolderName?: () => void;
   onFinalResult: (r: { resultCode?: string; pspReference?: string; txId?: string; provisional?: boolean; statusCheckUrl?: string }) => void;
   onError: (e: any) => void;
+  onEncryptedCardNumber?: (enc: string) => void;
 };
 
 export default function AdyenDropin({
@@ -23,10 +24,12 @@ export default function AdyenDropin({
   cardHolderName,
   onRequireHolderName,
   onFinalResult,
-  onError
+  onError,
+  onEncryptedCardNumber
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const holderNameRef = useRef<string | undefined>(cardHolderName);
+  const lastEncRef = useRef<string | null>(null);
 
   // Keep latest holder name without remounting Drop-in on each keystroke
   useEffect(() => {
@@ -43,6 +46,13 @@ export default function AdyenDropin({
           clientKey: import.meta.env.VITE_ADYEN_CLIENT_KEY,
           paymentMethodsResponse,
           amount: { value: amount.value, currency: amount.currency },
+          onChange: (state) => {
+            const enc = (state as any)?.data?.paymentMethod?.encryptedCardNumber;
+            if (enc && enc !== lastEncRef.current) {
+              lastEncRef.current = enc;
+              onEncryptedCardNumber?.(enc);
+            }
+          },
           onError: (error) => {
             onError(error);
           },
@@ -51,6 +61,8 @@ export default function AdyenDropin({
               // Prevent submitting when card holder name is missing
               if (!holderNameRef.current || !holderNameRef.current.trim()) {
                 onRequireHolderName?.();
+                // Reset Drop-in status so the Pay button is re-enabled
+                try { dropinInstance?.setStatus?.('ready'); } catch {}
                 return;
               }
               const res = await createPayment({

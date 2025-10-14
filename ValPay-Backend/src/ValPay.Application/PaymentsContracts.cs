@@ -33,3 +33,21 @@ public record CreatePaymentRequest(
 
 public record CreatePaymentResponse(string ResultCode, string? PspReference, object? Action, object Raw);
 
+public record CostEstimateRequest(
+    [property: JsonPropertyName("reference")] string Reference,
+    [property: JsonPropertyName("transactionId")] Guid TransactionId,
+    [property: JsonPropertyName("amount")] Amount Amount,
+    [property: JsonPropertyName("encryptedCardNumber")] string EncryptedCardNumber,
+    [property: JsonPropertyName("country")] string? Country = null,
+    [property: JsonPropertyName("shopperInteraction")] string? ShopperInteraction = "Ecommerce",
+    [property: JsonPropertyName("assumptions")] object? Assumptions = null);
+
+public record Amount(
+    [property: JsonPropertyName("value")] long Value,
+    [property: JsonPropertyName("currency")] string Currency);
+
+public record CostEstimateResponse(
+    [property: JsonPropertyName("surchargeAmount")] long SurchargeAmount,
+    [property: JsonPropertyName("totalWithSurcharge")] long TotalWithSurcharge,
+    [property: JsonPropertyName("raw")] object Raw);
+

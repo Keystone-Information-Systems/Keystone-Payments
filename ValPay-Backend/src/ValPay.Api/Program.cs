@@ -695,6 +695,83 @@ app.MapPost("/payments", async (
 })
 .WithName("CreatePayment");
 
+app.MapPost("/payments/cost-estimate", async (
+    CostEstimateRequest req,
+    IAdyenClient adyen,
+    Db db,
+    ILogger<Program> logger,
+    CancellationToken ct) =>
+{
+    var correlationId = Guid.NewGuid().ToString();
+    logger.LogInformation("Cost estimate request for tx {TxId}, ref {Ref}. CorrelationId: {CorrelationId}", req.TransactionId, req.Reference, correlationId);
+
+    try
+    {
+        if (req.TransactionId == Guid.Empty)
+        {
+            return Results.BadRequest(new { error = "transactionId is required" });
+        }
+        if (req.Amount is null || req.Amount.Value <= 0)
+        {
+            return Results.BadRequest(new { error = "amount.value must be > 0" });
+        }
+        var currency = string.IsNullOrWhiteSpace(req.Amount.Currency) ? "USD" : req.Amount.Currency;
+        var country = string.IsNullOrWhiteSpace(req.Country) ? "US" : req.Country;
+
+        // Verify transaction exists and load current amount
+        using var c = db.Open();
+        var tx = await c.QuerySingleOrDefaultAsync<(Guid TransactionId, long AmountValue)?>(
+            "select transactionId, coalesce(amountValue, 0) as amountValue from transactions where transactionId=@id",
+            new { id = req.TransactionId });
+        if (tx is null)
+        {
+            return Results.BadRequest(new { error = "Transaction not found" });
+        }
+
+        // Call Adyen BinLookup getCostEstimate using encryptedCardNumber
+        var adyenResp = await adyen.GetCostEstimateAsync(
+            req.Reference,
+            req.EncryptedCardNumber,
+            req.Amount.Value,
+            currency,
+            country!,
+            req.ShopperInteraction,
+            req.Assumptions,
+            ct);
+
+        // Extract surcharge from Adyen response; fall back to 0
+        long surcharge = 0;
+        try
+        {
+            if (adyenResp is System.Text.Json.JsonElement el && el.TryGetProperty("costEstimateAmount", out var cea))
+            {
+                var val = cea.TryGetProperty("value", out var v) ? v.GetInt64() : 0;
+                surcharge = val;
+            }
+        }
+        catch { surcharge = 0; }
+
+        var totalWithSurcharge = checked(req.Amount.Value + surcharge);
+
+        // Update DB: set amountValue = original + surcharge, and surcharge column
+        await db.UpdateAmountAndSurchargeAsync(req.TransactionId, totalWithSurcharge, surcharge, ct);
+
+        var response = new CostEstimateResponse(
+            SurchargeAmount: surcharge,
+            TotalWithSurcharge: totalWithSurcharge,
+            Raw: adyenResp);
+
+        logger.LogInformation("Cost estimate computed. Surcharge {Surcharge}, Total {Total}. CorrelationId: {CorrelationId}", surcharge, totalWithSurcharge, correlationId);
+        return Results.Ok(response);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Cost estimate failed. CorrelationId: {CorrelationId}", correlationId);
+        throw;
+    }
+})
+.WithName("GetCostEstimate");
+
 app.MapGet("/transactions/{id:guid}", async (Guid id, Db db, ILogger<Program> logger, CancellationToken ct) =>
 {
     var correlationId = Guid.NewGuid().ToString();

@@ -11,6 +11,8 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
 {
     private readonly string _merchantAccount = cfg["Adyen:MerchantAccount"] ?? "";
     private readonly string _apiVersion = cfg["Adyen:ApiVersion"] ?? "v71";
+    private readonly string _binLookupVersion = cfg["Adyen:BinLookupVersion"] ?? "v54";
+    private readonly string _palBaseUrl = cfg["Adyen:PalBaseUrl"] ?? "https://pal-test.adyen.com";
     private readonly bool _useMockPaymentMethods =
         bool.TryParse(cfg["Adyen:UseMockPaymentMethods"], out var b) && b;
     private readonly ILogger<AdyenClient> _logger = logger;
@@ -64,6 +66,40 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get payment methods for amount {Amount} {Currency}", req.AmountMinor, req.Currency);
+            throw;
+        }
+    }
+
+    public async Task<object> GetCostEstimateAsync(string reference, string encryptedCardNumber, long amountMinor, string currency, string country, string? shopperInteraction, object? assumptions, CancellationToken ct)
+    {
+        try
+        {
+            var payload = new
+            {
+                merchantAccount = _merchantAccount,
+                amount = new { value = amountMinor, currency },
+                reference,
+                countryCode = country,
+                encryptedCardNumber,
+                shopperInteraction = string.IsNullOrWhiteSpace(shopperInteraction) ? "Ecommerce" : shopperInteraction,
+                assumptions
+            };
+
+            using var message = new HttpRequestMessage(HttpMethod.Post, new Uri($"{_palBaseUrl}/pal/servlet/BinLookup/{_binLookupVersion}/getCostEstimate"))
+            {
+                Content = JsonContent.Create(payload)
+            };
+            var res = await http.SendAsync(message, ct);
+            var body = await res.Content.ReadAsStringAsync(ct);
+            if (!res.IsSuccessStatusCode)
+                throw new HttpRequestException($"Adyen {res.StatusCode}: {body}");
+
+            var json = JsonDocument.Parse(body).RootElement.Clone();
+            return json;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get cost estimate for {Amount}{Currency}", amountMinor, currency);
             throw;
         }
     }
