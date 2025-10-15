@@ -646,7 +646,21 @@ app.MapPost("/payments", async (
         var tenantId = row.Value.TenantId;
         logger.LogInformation($"Found existing transaction {txId} for reference {req.Reference}");
 
-        var res = await adyen.CreatePaymentAsync(req, idempotencyKey, ct);
+        // If a surcharge exists, ensure total sent to Adyen is base + surcharge
+        long baseAmount;
+        long surcharge;
+        using (var c2 = db.Open())
+        {
+            var amtRow = await c2.QuerySingleOrDefaultAsync<(long AmountValue, long Surcharge)?>(
+                "select coalesce(amountValue,0) as amountValue, coalesce(surcharge,0) as surcharge from transactions where transactionId=@id",
+                new { id = txId });
+            baseAmount = amtRow?.AmountValue ?? req.AmountMinor;
+            surcharge = amtRow?.Surcharge ?? 0;
+        }
+
+        var adjustedReq = req with { AmountMinor = checked(baseAmount + surcharge) };
+
+        var res = await adyen.CreatePaymentAsync(adjustedReq, idempotencyKey, ct);
 
         // Update cardholder name (if provided) at payment creation stage only
         if (!string.IsNullOrWhiteSpace(req.CardHolderName))
@@ -664,7 +678,7 @@ app.MapPost("/payments", async (
             null,
             tenantId,
             "PAYMENT_PROCESSED",
-            req.AmountMinor,
+            adjustedReq.AmountMinor,
             req.Currency,
             res.Raw,
             ct);
@@ -718,10 +732,10 @@ app.MapPost("/payments/cost-estimate", async (
         var currency = string.IsNullOrWhiteSpace(req.Amount.Currency) ? "USD" : req.Amount.Currency;
         var country = string.IsNullOrWhiteSpace(req.Country) ? "US" : req.Country;
 
-        // Verify transaction exists and load current amount
+        // Verify transaction exists and load base amount and current surcharge
         using var c = db.Open();
-        var tx = await c.QuerySingleOrDefaultAsync<(Guid TransactionId, long AmountValue)?>(
-            "select transactionId, coalesce(amountValue, 0) as amountValue from transactions where transactionId=@id",
+        var tx = await c.QuerySingleOrDefaultAsync<(Guid TransactionId, long AmountValue, long Surcharge)?> (
+            "select transactionId, coalesce(amountValue, 0) as amountValue, coalesce(surcharge, 0) as surcharge from transactions where transactionId=@id",
             new { id = req.TransactionId });
         if (tx is null)
         {
@@ -732,7 +746,7 @@ app.MapPost("/payments/cost-estimate", async (
         var adyenResp = await adyen.GetCostEstimateAsync(
             req.Reference,
             req.EncryptedCardNumber,
-            req.Amount.Value,
+            tx.Value.AmountValue, // always estimate from base amount
             currency,
             country!,
             req.ShopperInteraction,
@@ -751,10 +765,10 @@ app.MapPost("/payments/cost-estimate", async (
         }
         catch { surcharge = 0; }
 
-        var totalWithSurcharge = checked(req.Amount.Value + surcharge);
+        // Update DB: only set surcharge; base amount remains immutable
+        await db.UpdateSurchargeAsync(req.TransactionId, surcharge, ct);
 
-        // Update DB: set amountValue = original + surcharge, and surcharge column
-        await db.UpdateAmountAndSurchargeAsync(req.TransactionId, totalWithSurcharge, surcharge, ct);
+        var totalWithSurcharge = checked(tx.Value.AmountValue + surcharge);
 
         var response = new CostEstimateResponse(
             SurchargeAmount: surcharge,

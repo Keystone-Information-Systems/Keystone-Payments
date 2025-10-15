@@ -1,14 +1,17 @@
 import { useEffect, useRef } from 'react';
 import AdyenCheckout from '@adyen/adyen-web';
 import '@adyen/adyen-web/dist/adyen.css';
-import { createPayment, submitAdditionalDetails } from '@/services/paymentService';
+import { createPayment, submitAdditionalDetails, estimatePaymentCost } from '@/services/paymentService';
 
 type Props = {
   // Server-locked data from /paymentMethods (DO NOT accept shopper inputs here)
   paymentMethodsResponse: any;
   reference: string;
   amount: { value: number; currency: string };
+  // Provide latest total at submit time (base + surcharge)
+  getSubmitAmount?: () => { value: number; currency: string };
   countryCode: string;
+  transactionId?: string;
   cardHolderName?: string;
   onRequireHolderName?: () => void;
   onFinalResult: (r: { resultCode?: string; pspReference?: string; txId?: string; provisional?: boolean; statusCheckUrl?: string }) => void;
@@ -20,7 +23,9 @@ export default function AdyenDropin({
   paymentMethodsResponse,
   reference,
   amount,
+  getSubmitAmount,
   countryCode,
+  transactionId,
   cardHolderName,
   onRequireHolderName,
   onFinalResult,
@@ -28,8 +33,10 @@ export default function AdyenDropin({
   onEncryptedCardNumber
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const dropinRef = useRef<any>(null);
   const holderNameRef = useRef<string | undefined>(cardHolderName);
   const lastEncRef = useRef<string | null>(null);
+  const initialPropsRef = useRef({ paymentMethodsResponse, reference, amount, countryCode, transactionId });
 
   // Keep latest holder name without remounting Drop-in on each keystroke
   useEffect(() => {
@@ -41,11 +48,12 @@ export default function AdyenDropin({
 
     (async () => {
       try {
+        const { paymentMethodsResponse: pm, reference: ref, amount: amt, countryCode: cc, transactionId: txId } = initialPropsRef.current;
         const checkout = await AdyenCheckout({
           environment: import.meta.env.VITE_ADYEN_ENVIRONMENT || 'test',
           clientKey: import.meta.env.VITE_ADYEN_CLIENT_KEY,
-          paymentMethodsResponse,
-          amount: { value: amount.value, currency: amount.currency },
+          paymentMethodsResponse: pm,
+          // Omit amount to avoid label and dependency-driven remounts
           onChange: (state) => {
             const enc = (state as any)?.data?.paymentMethod?.encryptedCardNumber;
             if (enc && enc !== lastEncRef.current) {
@@ -65,10 +73,24 @@ export default function AdyenDropin({
                 try { dropinInstance?.setStatus?.('ready'); } catch {}
                 return;
               }
+              const encryptedCardNumber = (state as any)?.data?.paymentMethod?.encryptedCardNumber;
+              let submitAmount = getSubmitAmount?.() ?? amt;
+              try {
+                if (encryptedCardNumber) {
+                  const est = await estimatePaymentCost({
+                    amount: amt,
+                    encryptedCardNumber,
+                    reference: ref,
+                    shopperCountry: cc,
+                    transactionId: txId as any
+                  });
+                  submitAmount = { value: est.totalWithSurcharge, currency: amt.currency };
+                }
+              } catch {}
               const res = await createPayment({
-                reference,
-                amount,
-                countryCode,
+                reference: ref,
+                amount: submitAmount,
+                countryCode: cc,
                 returnUrl: `${window.location.origin}/payment/result`,
                 paymentMethod: state.data.paymentMethod,
                 cardHolderName: holderNameRef.current
@@ -84,6 +106,11 @@ export default function AdyenDropin({
                   provisional: (res as any).provisional,
                   statusCheckUrl: (res as any).statusCheckUrl
                 });
+                // Also surface the amount used via a custom event on the window for the parent to read if needed
+                try {
+                  const ev = new CustomEvent('valpay:submitAmountUsed', { detail: { value: submitAmount.value, currency: submitAmount.currency } });
+                  window.dispatchEvent(ev);
+                } catch {}
               }
             } catch (e) {
               onError(e);
@@ -104,13 +131,14 @@ export default function AdyenDropin({
         });
 
         dropin = checkout.create('dropin').mount(containerRef.current!);
+        dropinRef.current = dropin;
       } catch (e) {
         onError(e);
       }
     })();
 
-    return () => dropin?.unmount?.();
-  }, [paymentMethodsResponse, reference, amount.value, amount.currency, countryCode]);
+    return () => { try { dropin?.unmount?.(); } finally { dropinRef.current = null; } };
+  }, []);
 
   return <div ref={containerRef} id="dropin" />;
 }

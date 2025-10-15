@@ -226,20 +226,23 @@ public sealed class Db(string connStr)
             ct);
     }
 
-    public async Task UpdateAmountAndSurchargeAsync(Guid transactionId, long newAmountValue, long surchargeAmount, CancellationToken ct)
+    public async Task UpdateSurchargeAsync(Guid transactionId, long surchargeAmount, CancellationToken ct)
     {
         await ExecuteWithRetryAsync(async () =>
         {
             using var c = Open();
-            await c.ExecuteAsync("""
-            update transactions
-            set amountValue = @newAmountValue,
-                surcharge = @surchargeAmount,
-                updatedAt = now()
-            where transactionId = @transactionId;
-            """, new { transactionId, newAmountValue, surchargeAmount });
+            await c.ExecuteAsync(
+                """
+                update transactions
+                set surcharge = @surchargeAmount,
+                    updatedAt = now()
+                where transactionId = @transactionId;
+                """,
+                new { transactionId, surchargeAmount });
         });
     }
+
+
 
     public async Task<PaymentData?> GetPaymentDataByOrderIdAsync(string orderId, CancellationToken ct)
     {

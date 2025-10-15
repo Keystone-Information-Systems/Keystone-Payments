@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getPaymentMethods, cancelPayment, estimatePaymentCost } from '@/services/paymentService';
@@ -22,6 +22,8 @@ export default function NewPaymentPage() {
   // Surcharge-related state must be declared before any early returns to keep hook order stable
   const [surchargeMinor, setSurchargeMinor] = useState<number>(0);
   const [estimating, setEstimating] = useState<boolean>(false);
+  // Must be declared before any early returns (hooks order)
+  const totalToSendMinorRef = useRef<number>(0);
 
   useEffect(() => {
     if (!orderId) navigate('/'); // prevent loops via router config
@@ -39,6 +41,15 @@ export default function NewPaymentPage() {
       setHolderName(data.cardHolderName || '');
     }
   }, [data?.cardHolderName]);
+
+  // Keep latest total to send (base + surcharge) without changing hooks order
+  useEffect(() => {
+    if (!data) return;
+    const lineItemsLocal = data.lineItems ?? [];
+    const itemsTotalMinorLocal = lineItemsLocal.reduce((sum: number, li: any) => sum + (li?.amountValue ?? 0), 0);
+    const baseTotalMinorLocal = (data.amount?.value ?? itemsTotalMinorLocal);
+    totalToSendMinorRef.current = baseTotalMinorLocal + surchargeMinor;
+  }, [data?.amount?.value, data?.lineItems, surchargeMinor]);
 
   if (!orderId) return null;
   if (isLoading) return <LoadingSpinner size="lg" message="Loading payment methods..." />;
@@ -107,9 +118,6 @@ export default function NewPaymentPage() {
               <ReceiptLongIcon color="primary" />
               <Typography variant="h6">Items</Typography>
             </Box>
-            <Typography variant="subtitle1" className="font-semibold">
-              {formatCurrency(totalToPayMinor, amount.currency)}
-            </Typography>
           </Box>
           <Divider className="my-2" />
           <List dense>
@@ -142,6 +150,17 @@ export default function NewPaymentPage() {
             >
               <ListItemText primary="Surcharge fee" />
             </ListItem>
+            <ListItem
+              secondaryAction={
+                <Box sx={{ minWidth: 140, textAlign: 'right' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                    {formatCurrency(totalToPayMinor, amount.currency)}
+                  </Typography>
+                </Box>
+              }
+            >
+              <ListItemText primary="Total" primaryTypographyProps={{ variant: 'h6', fontWeight: 700 }} />
+            </ListItem>
           </List>
         </Paper>
       )}
@@ -162,6 +181,8 @@ export default function NewPaymentPage() {
         paymentMethodsResponse={paymentMethods}
         reference={reference}
         amount={amount}
+        transactionId={existingTransactionId}
+        getSubmitAmount={() => ({ value: totalToPayMinor, currency: amount.currency })}
         countryCode={countryCode}
         cardHolderName={holderName || undefined}
         onRequireHolderName={() => setShowNameWarning(true)}
@@ -172,7 +193,8 @@ export default function NewPaymentPage() {
               if (r.txId) qp.set('transactionId', r.txId);
               if (r.pspReference) qp.set('pspReference', r.pspReference);
               if (reference) qp.set('reference', reference);
-              if (amount?.value != null) qp.set('amountMinor', String(amount.value));
+              const used = totalToSendMinorRef.current;
+              if (used != null) qp.set('amountMinor', String(used));
               if (amount?.currency) qp.set('currency', amount.currency);
               if (r.statusCheckUrl) qp.set('statusCheckUrl', r.statusCheckUrl);
               navigate(`/payment/success?${qp.toString()}`,
@@ -180,7 +202,7 @@ export default function NewPaymentPage() {
                     transactionId: r.txId,
                     pspReference: r.pspReference,
                     reference,
-                    amountMinor: amount?.value,
+                    amountMinor: used,
                     currency: amount?.currency,
                     statusCheckUrl: r.statusCheckUrl
                   }
@@ -192,7 +214,8 @@ export default function NewPaymentPage() {
               if (r.pspReference) qp.set('pspReference', r.pspReference);
               // pass order reference and amount context as fallbacks for the success page
               if (reference) qp.set('reference', reference);
-              if (amount?.value != null) qp.set('amountMinor', String(amount.value));
+              const used = totalToSendMinorRef.current;
+              if (used != null) qp.set('amountMinor', String(used));
               if (amount?.currency) qp.set('currency', amount.currency);
               const qs = qp.toString();
               navigate(`/payment/success${qs ? `?${qs}` : ''}`,
@@ -200,7 +223,7 @@ export default function NewPaymentPage() {
                     transactionId: r.txId,
                     pspReference: r.pspReference,
                     reference,
-                    amountMinor: amount?.value,
+                    amountMinor: used,
                     currency: amount?.currency
                   }
                 }
