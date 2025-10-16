@@ -7,8 +7,8 @@ using ValPay.Infrastructure.Resilience;
 using ValPay.Infrastructure.Idempotency;
 using ValPay.Application;
 using System.Diagnostics;
-using ValPay.Api.Webhooks;
-using Adyen.Util;
+ 
+ 
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -153,136 +153,7 @@ app.MapPost("/payments/{id:guid}/cancel", async (Guid id, Db db, ILogger<Program
     }
 });
 
-// Webhook endpoint for Adyen notifications with HMAC verification and gated DB writes
-app.MapPost("/webhooks", async (HttpContext context, Db db, ILogger<Program> logger, CancellationToken ct) =>
-{
-    var correlationId = Guid.NewGuid().ToString();
-    logger.LogInformation("Webhook received. CorrelationId: {CorrelationId}", correlationId);
-
-    try
-    {
-        using var reader = new StreamReader(context.Request.Body);
-        var body = await reader.ReadToEndAsync(ct);
-
-        logger.LogDebug("Webhook payload: {Payload}", body);
-
-        var options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var req = System.Text.Json.JsonSerializer.Deserialize<ValPay.Api.Webhooks.NotificationRequest>(body, options);
-        if (req?.NotificationItems is null || req.NotificationItems.Count == 0)
-        {
-            logger.LogWarning("No notificationItems in payload. CorrelationId: {CorrelationId}", correlationId);
-            return Results.Text("[accepted]", "text/plain");
-        }
-
-        var hmacKey = app.Configuration["Adyen:HmacKey"] ?? Environment.GetEnvironmentVariable("Adyen__HmacKey") ?? string.Empty;
-        var enableDbWrites = app.Configuration.GetValue<bool>("Webhooks:EnableDbWrites");
-        var requireValidHmac = app.Configuration.GetValue<bool?>("Webhooks:RequireValidHmac") ?? true;
-
-        var validator = new HmacValidator();
-
-        for (int i = 0; i < (req.NotificationItems?.Count ?? 0); i++)
-        {
-            var container = (req.NotificationItems != null && req.NotificationItems.Count > i) ? req.NotificationItems[i] : null;
-            var item = container?.Item;
-            if (item is null)
-            {
-                logger.LogWarning("Missing NotificationRequestItem. CorrelationId: {CorrelationId}", correlationId);
-                continue;
-            }
-
-            // Map our model to Adyen's NotificationRequestItem for validation
-            var adyenItem = new Adyen.Model.Notification.NotificationRequestItem
-            {
-                EventCode = item.EventCode,
-                Success = string.Equals(item.Success, "true", StringComparison.OrdinalIgnoreCase),
-                MerchantAccountCode = item.MerchantAccountCode,
-                MerchantReference = item.MerchantReference,
-                PspReference = item.PspReference,
-                OriginalReference = item.OriginalReference,
-                Amount = item.Amount is null ? null : new Adyen.Model.Checkout.Amount
-                {
-                    Currency = item.Amount.Currency,
-                    Value = item.Amount.Value ?? 0
-                },
-                AdditionalData = new System.Collections.Generic.Dictionary<string, string>
-                {
-                    ["hmacSignature"] = item.AdditionalData?.HmacSignature ?? string.Empty
-                }
-            };
-
-            var isValid = false;
-            try { isValid = validator.IsValidHmac(adyenItem, hmacKey); } catch { isValid = false; }
-            if (!isValid)
-            {
-                logger.LogWarning("Invalid HMAC for event {EventCode} PSP {PspReference}. CorrelationId: {CorrelationId}", item.EventCode, item.PspReference, correlationId);
-                if (requireValidHmac)
-                {
-                    // Skip processing this item but still acknowledge overall
-                    continue;
-                }
-                // Proceeding because Webhooks:RequireValidHmac=false
-            }
-
-            logger.LogInformation("Valid webhook item. EventCode: {EventCode}, Success: {Success}, PSP: {PspReference}, MerchantRef: {MerchantReference}. CorrelationId: {CorrelationId}",
-                item.EventCode, item.Success, item.PspReference, item.MerchantReference, correlationId);
-
-            if (!enableDbWrites)
-            {
-                continue; // log-only in safe stage
-            }
-
-            if (!string.IsNullOrEmpty(item.MerchantReference) && !string.IsNullOrEmpty(item.EventCode))
-            {
-                using var connection = db.Open();
-                var transaction = await connection.QuerySingleOrDefaultAsync<dynamic>(
-                    "SELECT transactionId, tenantId FROM transactions WHERE merchantReference = @ref",
-                    new { @ref = item.MerchantReference });
-
-                if (transaction != null)
-                {
-                    var txId = (Guid)transaction.transactionid;
-                    var tenantId = (Guid)transaction.tenantid;
-
-                    var status = item.EventCode switch
-                    {
-                        "AUTHORISATION" when item.Success == "true" => "Authorised",
-                        "AUTHORISATION" when item.Success == "false" => "Refused",
-                        "CAPTURE" => "Captured",
-                        "CANCELLATION" => "Cancelled",
-                        "REFUND" => "Refunded",
-                        _ => null
-                    };
-
-                    if (status != null)
-                    {
-                        await db.UpdateStatusWithOperationAsync(
-                            txId,
-                            status,
-                            item.PspReference,
-                            item.EventCode,
-                            null,
-                            tenantId,
-                            $"WEBHOOK_{item.EventCode}",
-                            null,
-                            null,
-                            body,
-                            ct);
-
-                        logger.LogInformation("Transaction {TxId} updated to status {Status} from webhook", txId, status);
-                    }
-                }
-            }
-        }
-
-        return Results.Text("[accepted]", "text/plain");
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error processing webhook. CorrelationId: {CorrelationId}", correlationId);
-        // Don’t leak errors; acknowledge to avoid retries for malformed data
-        return Results.Text("[accepted]", "text/plain");
-    }
-});
+// Removed test /webhooks endpoint; real webhooks are handled by ValPay.Webhook Lambda
 
 // Debug endpoints
 app.MapGet("/debug/config", (IConfiguration config) => new

@@ -25,8 +25,8 @@ export default defineConfig({
     },
   },
   define: {
-    // Hardcoded values - environment variables commented out
-    'process.env.VITE_API_BASE_URL': JSON.stringify('http://localhost:5000'),
+    // Use relative API base so ngrok + Vite proxy work on Free
+    'process.env.VITE_API_BASE_URL': JSON.stringify('/api'),
     'process.env.VITE_ADYEN_CLIENT_KEY': JSON.stringify('test_DVRLC56S3RCH5JWVCEBDLLJYEMGXT57T'),
     'process.env.VITE_ENVIRONMENT': JSON.stringify('test'),
     // Original environment variable code (commented):
@@ -39,6 +39,26 @@ export default defineConfig({
     host: true,
     open: true,
     strictPort: true,
+
+    // ✅ Allow your ngrok host (Option A)
+    allowedHosts: ['alfredo-frumentaceous-maniacally.ngrok-free.dev'],
+
+    // ✅ Dev proxy: /api -> .NET backend on :5000
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        // optional: if your API expects /api prefix remove it by uncommenting:
+        rewrite: path => path.replace(/^\/api/, ''),
+      },
+    },
+
+    // ✅ HMR over ngrok so hot-reload works behind https
+    hmr: {
+      host: 'alfredo-frumentaceous-maniacally.ngrok-free.dev',
+      protocol: 'wss',
+      port: 443,
+    },
   },
   css: {
     devSourcemap: true,
