@@ -15,6 +15,10 @@ public record PaymentMethodsRequest(
     [property: JsonPropertyName("country")] string? Country, 
     [property: JsonPropertyName("merchantAccount")] string MerchantAccount, 
     [property: JsonPropertyName("orderId")] string OrderId,
+    // Legacy redirect POST target for final handoff (single URL for all outcomes)
+    [property: JsonPropertyName("legacyPostUrl")] string? LegacyPostUrl = null,
+    // Percentage for surcharge provided by legacy system (0-100). Used to compute surcharge amount immediately.
+    [property: JsonPropertyName("surchargePercent")] int? SurchargePercent = null,
     [property: JsonPropertyName("username")] string? Username = null,
     [property: JsonPropertyName("email")] string? Email = null,
     [property: JsonPropertyName("cardHolderName")] string? CardHolderName = null,

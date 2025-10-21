@@ -250,7 +250,9 @@ app.MapPost("/getpaymentMethods", async (Db db, HttpContext ctx, CancellationTok
                 lineItems = emptyLineItems,
                 username = data.Username,
                 email = data.Email,
-                cardHolderName = data.CardHolderName
+                cardHolderName = data.CardHolderName,
+                surcharge = new { amount = data.SurchargeAmount ?? 0, percent = (int?)null },
+                legacyPostUrl = data.LegacyPostUrl ?? string.Empty
             };
             return Results.Ok(emptyResponse);
         }
@@ -271,7 +273,9 @@ app.MapPost("/getpaymentMethods", async (Db db, HttpContext ctx, CancellationTok
             lineItems = responseLineItems2,
             username = data.Username,
             email = data.Email,
-            cardHolderName = data.CardHolderName
+            cardHolderName = data.CardHolderName,
+            surcharge = new { amount = data.SurchargeAmount ?? 0, percent = (int?)null },
+            legacyPostUrl = data.LegacyPostUrl ?? string.Empty
         };
 
         return Results.Ok(response);
@@ -324,6 +328,25 @@ app.MapPost("/paymentMethods", async (
             return Results.BadRequest(new { error = "MerchantAccount is required", field = "merchantAccount" });
         }
 
+        // Require legacyPostUrl for final handoff and surchargePercent to compute surcharge up front
+        if (string.IsNullOrWhiteSpace(req.LegacyPostUrl))
+        {
+            return Results.BadRequest(new { error = "legacyPostUrl is required", field = "legacyPostUrl", code = "MissingRedirectUrl" });
+        }
+        if (!Uri.TryCreate(req.LegacyPostUrl, UriKind.Absolute, out var legacyUri) ||
+            !(legacyUri.Scheme == Uri.UriSchemeHttps || legacyUri.Scheme == Uri.UriSchemeHttp))
+        {
+            return Results.BadRequest(new { error = "legacyPostUrl must be a valid absolute URL", field = "legacyPostUrl" });
+        }
+        if (req.SurchargePercent is null)
+        {
+            return Results.BadRequest(new { error = "surchargePercent is required", field = "surchargePercent" });
+        }
+        if (req.SurchargePercent < 0 || req.SurchargePercent > 100)
+        {
+            return Results.BadRequest(new { error = "surchargePercent must be between 0 and 100", field = "surchargePercent" });
+        }
+
         logger.LogInformation("Step 1: Resolving tenant. CorrelationId: {CorrelationId}", correlationId);
         // Get tenant ID from tenants table
         var TId = await db.GetTenantIdByMerchantAccountAsync(req.MerchantAccount, ct);
@@ -367,6 +390,11 @@ app.MapPost("/paymentMethods", async (
         }
 
         await db.CreatePendingAsync(TxId, tenantId, req.OrderId, amountMinor, currency, idempotencyKey, req.Username, req.Email, ct);
+
+        // Compute surcharge amount using provided percent and persist amount only
+        var surchargeAmount = (long)Math.Round(amountMinor * (req.SurchargePercent!.Value / 100.0));
+        if (surchargeAmount < 0) surchargeAmount = 0;
+        await db.UpdateSurchargeAsync(TxId, surchargeAmount, ct);
 
         // Log transaction creation operation
         await db.CreateOperationAsync(
@@ -413,7 +441,9 @@ app.MapPost("/paymentMethods", async (
             paymentUrl = paymentUrl,
             paymentMethods = adyenResponse,
             username = req.Username,
-            email = req.Email
+            email = req.Email,
+            surcharge = new { amount = surchargeAmount, percent = req.SurchargePercent },
+            legacyPostUrl = req.LegacyPostUrl
         };
 
         logger.LogInformation("Step 5: Caching response. CorrelationId: {CorrelationId}", correlationId);

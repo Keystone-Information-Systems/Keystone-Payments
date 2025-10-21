@@ -1,7 +1,7 @@
 import React from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getTransactionStatus } from '@/services/paymentService';
+import { getTransactionStatus, getPaymentMethods, cancelPayment } from '@/services/paymentService';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { formatCurrency } from '@/utils/formatters';
 
@@ -12,6 +12,8 @@ export const PaymentErrorPage: React.FC = () => {
   const transactionId = searchParams.get('transactionId');
   const sessionId = searchParams.get('sessionId');
   const reason = searchParams.get('reason') || 'unknown';
+  const referenceFromQuery = searchParams.get('reference');
+  const [cancelLoading, setCancelLoading] = React.useState(false);
 
   const {
     data: transaction,
@@ -20,6 +22,15 @@ export const PaymentErrorPage: React.FC = () => {
     queryKey: ['transaction', transactionId],
     queryFn: () => getTransactionStatus(transactionId!),
     enabled: !!transactionId,
+  });
+
+  const reference = referenceFromQuery || (transaction as any)?.merchantReference || undefined;
+
+  // Load legacyPostUrl for cancel redirect
+  const { data: pmData } = useQuery({
+    queryKey: ['pmData-error', reference],
+    queryFn: () => getPaymentMethods({ orderId: reference! }),
+    enabled: !!reference
   });
 
   const getErrorInfo = (reason: string, transaction?: any) => {
@@ -149,9 +160,18 @@ export const PaymentErrorPage: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <p className="text-sm font-medium text-gray-500 mb-1">Amount</p>
-                <p className="text-2xl font-bold text-primary-600">
-                  {formatCurrency(transaction.amountValue, transaction.currencyCode)}
-                </p>
+                {(() => {
+                  const qpCur = searchParams.get('currency');
+                  const displayCurrency = qpCur || (transaction as any)?.currencyCode || (transaction as any)?.amount?.currency || undefined;
+                  const displayAmount = (transaction as any)?.amountValue;
+                  return (
+                    <p className="text-2xl font-bold text-primary-600">
+                      {typeof displayAmount === 'number' && displayCurrency
+                        ? formatCurrency(displayAmount, displayCurrency)
+                        : '-'}
+                    </p>
+                  );
+                })()}
               </div>
               
               <div>
@@ -212,59 +232,71 @@ export const PaymentErrorPage: React.FC = () => {
           </div>
         )}
 
-        {/* Troubleshooting Tips */}
-        <div className="card mb-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">
-            What can you do?
-          </h2>
-          <ul className="space-y-2 text-sm text-gray-600">
-            <li className="flex items-start">
-              <span className="flex-shrink-0 w-1.5 h-1.5 bg-gray-400 rounded-full mt-2 mr-3"></span>
-              Try using a different test card number
-            </li>
-            <li className="flex items-start">
-              <span className="flex-shrink-0 w-1.5 h-1.5 bg-gray-400 rounded-full mt-2 mr-3"></span>
-              Check that all card details are entered correctly
-            </li>
-            <li className="flex items-start">
-              <span className="flex-shrink-0 w-1.5 h-1.5 bg-gray-400 rounded-full mt-2 mr-3"></span>
-              Ensure your internet connection is stable
-            </li>
-            <li className="flex items-start">
-              <span className="flex-shrink-0 w-1.5 h-1.5 bg-gray-400 rounded-full mt-2 mr-3"></span>
-              Try again in a few minutes
-            </li>
-          </ul>
-        </div>
+        {/* Minimal actions only */}
 
         {/* Actions */}
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
           <button
-            onClick={() => navigate('/')}
+            onClick={() => {
+              if (reference) navigate(`/payment?orderId=${encodeURIComponent(reference)}`);
+              else navigate('/');
+            }}
             className="btn-primary"
           >
             Try Again
           </button>
-          
+
           <button
-            onClick={() => navigate('/')}
+            disabled={cancelLoading}
+            onClick={async () => {
+              try {
+                setCancelLoading(true);
+                if (transactionId) {
+                  try { await cancelPayment(transactionId); } catch {}
+                }
+                const legacyUrl = pmData?.legacyPostUrl;
+                if (legacyUrl && reference) {
+                  const payload = {
+                    status: 'Cancelled',
+                    legacyReference: reference,
+                    paymentId: transactionId || '',
+                    pspReference: transaction?.pspReference || '',
+                    amount: transaction?.amountValue || 0,
+                    currency: transaction?.currencyCode || '',
+                    surchargeAmount: pmData?.surcharge?.amount ?? 0,
+                    timestamp: new Date().toISOString()
+                  };
+                  const form = document.createElement('form');
+                  form.method = 'POST';
+                  form.action = legacyUrl;
+                  form.style.display = 'none';
+                  const input = document.createElement('input');
+                  input.type = 'hidden';
+                  input.name = 'payload';
+                  input.value = [
+                    payload.status,
+                    payload.legacyReference,
+                    payload.paymentId,
+                    payload.pspReference,
+                    String(payload.amount),
+                    payload.currency,
+                    String(payload.surchargeAmount),
+                    payload.timestamp
+                  ].join('|');
+                  form.appendChild(input);
+                  document.body.appendChild(form);
+                  form.submit();
+                  return;
+                }
+                navigate('/');
+              } finally {
+                setCancelLoading(false);
+              }
+            }}
             className="btn-secondary"
           >
-            New Payment
+            {cancelLoading ? 'Cancelling…' : 'Cancel'}
           </button>
-
-          {transactionId && (
-            <button
-              onClick={() => {
-                const details = `Transaction ID: ${transactionId}\nReason: ${reason}\nStatus: ${transaction?.status || 'Unknown'}`;
-                navigator.clipboard.writeText(details);
-                alert('Error details copied to clipboard!');
-              }}
-              className="btn-secondary"
-            >
-              Copy Error Details
-            </button>
-          )}
         </div>
 
         {/* Test Mode Notice */}

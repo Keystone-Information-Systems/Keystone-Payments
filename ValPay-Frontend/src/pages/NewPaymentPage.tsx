@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getPaymentMethods, cancelPayment, estimatePaymentCost } from '@/services/paymentService';
+import { getPaymentMethods, cancelPayment } from '@/services/paymentService';
 import AdyenDropin from '@/components/payment/AdyenDropin';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { formatCurrency } from '@/utils/formatters';
@@ -20,8 +20,8 @@ export default function NewPaymentPage() {
   const [cancelLoading, setCancelLoading] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   // Surcharge-related state must be declared before any early returns to keep hook order stable
-  const [surchargeMinor, setSurchargeMinor] = useState<number>(0);
-  const [estimating, setEstimating] = useState<boolean>(false);
+  const [surchargeMinor] = useState<number>(0);
+  // estimation removed; do not use state
   // Must be declared before any early returns (hooks order)
   const totalToSendMinorRef = useRef<number>(0);
 
@@ -48,7 +48,8 @@ export default function NewPaymentPage() {
     const lineItemsLocal = data.lineItems ?? [];
     const itemsTotalMinorLocal = lineItemsLocal.reduce((sum: number, li: any) => sum + (li?.amountValue ?? 0), 0);
     const baseTotalMinorLocal = (data.amount?.value ?? itemsTotalMinorLocal);
-    totalToSendMinorRef.current = baseTotalMinorLocal + surchargeMinor;
+    const backendSurcharge = (data as any)?.surcharge?.amount ?? 0;
+    totalToSendMinorRef.current = baseTotalMinorLocal + (surchargeMinor || backendSurcharge);
   }, [data?.amount?.value, data?.lineItems, surchargeMinor]);
 
   if (!orderId) return null;
@@ -63,10 +64,12 @@ export default function NewPaymentPage() {
     );
   }
 
-  const { paymentMethods, reference, amount, countryCode, lineItems = [], username, email, transactionId } = data;
+  const { paymentMethods, reference, amount, countryCode, lineItems = [], username, email, transactionId, surcharge } = data;
   const itemsTotalMinor = lineItems.reduce((sum: number, li: any) => sum + (li?.amountValue ?? 0), 0);
   const baseTotalMinor = amount?.value ?? itemsTotalMinor;
-  const totalToPayMinor = baseTotalMinor + surchargeMinor;
+  // Use backend-provided surcharge amount if available
+  const initialSurchargeMinor = surcharge?.amount ?? 0;
+  const totalToPayMinor = baseTotalMinor + (surchargeMinor || initialSurchargeMinor);
   const holderNameError = !holderName.trim();
   const showError = showNameWarning && holderNameError;
 
@@ -87,6 +90,33 @@ export default function NewPaymentPage() {
             try {
               setCancelLoading(true); setCancelError(null);
               await cancelPayment(existingTransactionId);
+              // Load legacyPostUrl and surcharge to build cancel POST
+              const pm = await getPaymentMethods({ orderId: reference });
+              const legacyUrl: string | undefined = (pm as any)?.legacyPostUrl;
+              if (legacyUrl) {
+                const inputVal = [
+                  'Cancelled',
+                  reference,
+                  existingTransactionId,
+                  '',
+                  String(baseTotalMinor + (pm?.surcharge?.amount ?? 0)),
+                  amount.currency,
+                  String(pm?.surcharge?.amount ?? 0),
+                  new Date().toISOString()
+                ].join('|');
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = legacyUrl;
+                form.style.display = 'none';
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'payload';
+                input.value = inputVal;
+                form.appendChild(input);
+                document.body.appendChild(form);
+                form.submit();
+                return;
+              }
               navigate('/');
             } catch (e: any) {
               setCancelError(e?.message || 'Cancel failed');
@@ -140,10 +170,7 @@ export default function NewPaymentPage() {
               secondaryAction={
                 <Box sx={{ minWidth: 140, textAlign: 'right' }}>
                   <Typography variant="body2">
-                    {formatCurrency(surchargeMinor, amount.currency)}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {surchargeMinor === 0 && !estimating ? 'Will be calculated after card number' : estimating ? 'Estimating…' : ''}
+                    {formatCurrency(initialSurchargeMinor, amount.currency)}
                   </Typography>
                 </Box>
               }
@@ -229,27 +256,18 @@ export default function NewPaymentPage() {
                 }
               );
             } else {
-              navigate(`/payment/error?reason=${rc || 'refused'}`);
+              const qp = new URLSearchParams();
+              if (r.txId) qp.set('transactionId', r.txId);
+              if (reference) qp.set('reference', reference);
+              navigate(`/payment/error?reason=${encodeURIComponent(rc || 'refused')}&${qp.toString()}`);
             }
         }}
         onError={(e) => {
             console.error('Adyen error', e);
-            navigate('/payment/error?reason=failed');
-        }}
-        onEncryptedCardNumber={async (encryptedCardNumber) => {
-            setEstimating(true);
-            try {
-              const res = await estimatePaymentCost({
-                amount,
-                encryptedCardNumber,
-                reference,
-                shopperCountry: countryCode,
-                transactionId: existingTransactionId
-              });
-              setSurchargeMinor(res.surchargeAmount ?? 0);
-            } finally {
-              setEstimating(false);
-            }
+            const qp = new URLSearchParams();
+            if (existingTransactionId) qp.set('transactionId', existingTransactionId);
+            if (reference) qp.set('reference', reference);
+            navigate(`/payment/error?reason=failed${qp.toString() ? `&${qp.toString()}` : ''}`);
         }}
       />
     </div>

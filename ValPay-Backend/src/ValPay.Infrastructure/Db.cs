@@ -24,7 +24,9 @@ public sealed class Db(string connStr)
         IReadOnlyList<LineItemDto>? LineItems,
         string? Username,
         string? Email,
-        string? CardHolderName);
+        string? CardHolderName,
+        long? SurchargeAmount,
+        string? LegacyPostUrl);
 
     public sealed record LineItemDto(
         Guid LineItemId,
@@ -279,6 +281,8 @@ public sealed class Db(string connStr)
 
             object? paymentMethods = null;
             string? sessionId = null;
+            long? surchargeAmount = null;
+            string? legacyPostUrl = null;
             if (!string.IsNullOrEmpty(cachedResponse))
             {
                 using var doc = JsonDocument.Parse(cachedResponse);
@@ -290,6 +294,21 @@ public sealed class Db(string connStr)
                 if (root.TryGetProperty("sessionId", out var sid))
                 {
                     sessionId = sid.GetString();
+                }
+                if (root.TryGetProperty("surcharge", out var sc))
+                {
+                    try
+                    {
+                        if (sc.ValueKind == JsonValueKind.Object && sc.TryGetProperty("amount", out var amtEl))
+                        {
+                            surchargeAmount = amtEl.GetInt64();
+                        }
+                    }
+                    catch { }
+                }
+                if (root.TryGetProperty("legacyPostUrl", out var lpu))
+                {
+                    try { legacyPostUrl = lpu.GetString(); } catch { }
                 }
             }
 
@@ -323,7 +342,9 @@ public sealed class Db(string connStr)
                 lineItems,
                 txRow.Username,
                 txRow.Email,
-                txRow.CardHolderName);
+                txRow.CardHolderName,
+                surchargeAmount,
+                legacyPostUrl);
         });
     }
 

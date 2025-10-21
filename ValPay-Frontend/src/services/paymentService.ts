@@ -20,7 +20,9 @@ export const schemas = {
     ).optional().default([]),
     username: z.string().nullable().optional(),
     email: z.string().nullable().optional(),
-    cardHolderName: z.string().nullable().optional()
+    cardHolderName: z.string().nullable().optional(),
+    surcharge: z.object({ amount: z.number().int().nonnegative(), percent: z.number().int().min(0).max(100).nullable().optional() }).optional(),
+    legacyPostUrl: z.string().url()
   }),
   paymentsRes: z.object({
     resultCode: z.string().optional(),
