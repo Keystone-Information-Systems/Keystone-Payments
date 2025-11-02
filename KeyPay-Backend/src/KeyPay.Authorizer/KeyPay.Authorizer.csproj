@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AWSProjectType>Lambda</AWSProjectType>
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Amazon.Lambda.Core" Version="2.*" />
+    <PackageReference Include="Amazon.Lambda.APIGatewayEvents" Version="2.*" />
+    <PackageReference Include="Amazon.Lambda.Serialization.SystemTextJson" Version="2.*" />
+    <PackageReference Include="AWSSDK.SecretsManager" Version="4.*" />
+    <PackageReference Include="Npgsql" Version="8.*" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="7.*" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="7.*" />
+  </ItemGroup>
+</Project>
+
+

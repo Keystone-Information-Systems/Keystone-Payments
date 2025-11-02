@@ -9,6 +9,8 @@
     <PackageReference Include="Adyen" Version="10.*" />
     <PackageReference Include="Amazon.Lambda.Core" Version="2.*" />
     <PackageReference Include="Amazon.Lambda.APIGatewayEvents" Version="2.*" />
+    <PackageReference Include="Amazon.Lambda.Serialization.SystemTextJson" Version="2.*" />
+    <PackageReference Include="AWSSDK.SecretsManager" Version="4.*" />
     <PackageReference Include="Dapper" Version="2.*" />
     <PackageReference Include="Npgsql" Version="8.*" />
   </ItemGroup>

@@ -4,10 +4,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using KeyPay.Application;
 using KeyPay.Infrastructure.Resilience;
+using Microsoft.AspNetCore.Http;
 
 namespace KeyPay.Infrastructure;
 
-public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<AdyenClient> logger) : IAdyenClient
+public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<AdyenClient> logger, IHttpContextAccessor httpContextAccessor) : IAdyenClient
 {
     private readonly string _merchantAccount = cfg["Adyen:MerchantAccount"] ?? "";
     private readonly string _apiVersion = cfg["Adyen:ApiVersion"] ?? "v71";
@@ -16,6 +17,7 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
     private readonly bool _useMockPaymentMethods =
         bool.TryParse(cfg["Adyen:UseMockPaymentMethods"], out var b) && b;
     private readonly ILogger<AdyenClient> _logger = logger;
+    private readonly IHttpContextAccessor _httpContextAccessor = httpContextAccessor;
 
     public async Task<object> GetPaymentMethodsAsync(PaymentMethodsRequest req, CancellationToken ct)
     {
@@ -43,15 +45,29 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
                 return mockResponse;
             }
 
+            var current = _httpContextAccessor.HttpContext;
+            var merchant = current?.Items["MerchantAccount"] as string ?? _merchantAccount;
+            var adyenApiKey = current?.Items["AdyenApiKey"] as string;
+
             var payload = new
             {
-                merchantAccount = _merchantAccount,
+                merchantAccount = merchant,
                 amount = new { value = req.AmountMinor, currency = req.Currency },
                 countryCode = req.Country,
                 channel = "Web"
             };
 
-            using var res = await http.PostAsJsonAsync($"/{_apiVersion}/paymentMethods", payload, ct);
+            using var message = new HttpRequestMessage(HttpMethod.Post, $"/{_apiVersion}/paymentMethods")
+            {
+                Content = JsonContent.Create(payload)
+            };
+            if (!string.IsNullOrWhiteSpace(adyenApiKey))
+            {
+                message.Headers.Remove("X-API-Key");
+                message.Headers.TryAddWithoutValidation("X-API-Key", adyenApiKey);
+            }
+
+            using var res = await http.SendAsync(message, ct);
             var body = await res.Content.ReadAsStringAsync(ct);
 
             if (!res.IsSuccessStatusCode)
@@ -74,9 +90,13 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
     {
         try
         {
+            var current = _httpContextAccessor.HttpContext;
+            var merchant = current?.Items["MerchantAccount"] as string ?? _merchantAccount;
+            var adyenApiKey = current?.Items["AdyenApiKey"] as string;
+
             var payload = new
             {
-                merchantAccount = _merchantAccount,
+                merchantAccount = merchant,
                 amount = new { value = amountMinor, currency },
                 reference,
                 countryCode = country,
@@ -89,6 +109,11 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
             {
                 Content = JsonContent.Create(payload)
             };
+            if (!string.IsNullOrWhiteSpace(adyenApiKey))
+            {
+                message.Headers.Remove("X-API-Key");
+                message.Headers.TryAddWithoutValidation("X-API-Key", adyenApiKey);
+            }
             var res = await http.SendAsync(message, ct);
             var body = await res.Content.ReadAsStringAsync(ct);
             if (!res.IsSuccessStatusCode)
@@ -114,9 +139,13 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
             var countryCode = req.Country ?? "US";
             _logger.LogInformation("Country from request: {Country}, Using countryCode: {CountryCode}", req.Country ?? "NULL", countryCode);
 
+            var current = _httpContextAccessor.HttpContext;
+            var merchant = current?.Items["MerchantAccount"] as string ?? _merchantAccount;
+            var adyenApiKey = current?.Items["AdyenApiKey"] as string;
+
             var payload = new
             {
-                merchantAccount = _merchantAccount,
+                merchantAccount = merchant,
                 amount = new { value = req.AmountMinor, currency = req.Currency },
                 reference = req.Reference,
                 returnUrl = req.ReturnUrl,
@@ -133,6 +162,11 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
             {
                 Content = JsonContent.Create(payload)
             };
+            if (!string.IsNullOrWhiteSpace(adyenApiKey))
+            {
+                message.Headers.Remove("X-API-Key");
+                message.Headers.TryAddWithoutValidation("X-API-Key", adyenApiKey);
+            }
             if (!string.IsNullOrWhiteSpace(idempotencyKey))
             {
                 message.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
@@ -162,6 +196,35 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to create payment {Reference}", req.Reference);
+            throw;
+        }
+    }
+
+    public async Task<object> SubmitPaymentDetailsAsync(object details, CancellationToken ct)
+    {
+        try
+        {
+            var current = _httpContextAccessor.HttpContext;
+            var adyenApiKey = current?.Items["AdyenApiKey"] as string;
+            using var message = new HttpRequestMessage(HttpMethod.Post, $"/{_apiVersion}/payments/details")
+            {
+                Content = JsonContent.Create(details)
+            };
+            if (!string.IsNullOrWhiteSpace(adyenApiKey))
+            {
+                message.Headers.Remove("X-API-Key");
+                message.Headers.TryAddWithoutValidation("X-API-Key", adyenApiKey);
+            }
+            var res = await http.SendAsync(message, ct);
+            var body = await res.Content.ReadAsStringAsync(ct);
+            if (!res.IsSuccessStatusCode)
+                throw new HttpRequestException($"Adyen {res.StatusCode}: {body}");
+            var json = JsonDocument.Parse(body).RootElement.Clone();
+            return json;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to submit payment details");
             throw;
         }
     }

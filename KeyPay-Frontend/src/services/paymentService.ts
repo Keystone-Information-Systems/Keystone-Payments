@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { getAuthHeaders } from '@/stores/auth';
 
 const API = import.meta.env.VITE_API_BASE;
 
@@ -51,7 +52,7 @@ export const schemas = {
 export async function getPaymentMethods(payload: { orderId: string }) {
   const res = await fetch(`${API}/getpaymentMethods`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({ orderId: payload.orderId })
   });
   if (!res.ok) throw new Error(`paymentMethods ${res.status}`);
@@ -69,7 +70,7 @@ export async function createPayment(args: {
 }) {
   const res = await fetch(`${API}/payments`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({
       reference: args.reference,
       amountMinor: args.amount.value,
@@ -87,7 +88,7 @@ export async function createPayment(args: {
 export async function submitAdditionalDetails(detailsPayload: any) {
   const res = await fetch(`${API}/payments/details`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(detailsPayload)
   });
   if (!res.ok) throw new Error(`payments/details ${res.status}`);
@@ -117,7 +118,8 @@ export async function getTransactionStatus(transactionId: string) {
   const res = await fetch(`${API}/transactions/${transactionId}`, {
     headers: {
       'Accept': 'application/json',
-      'ngrok-skip-browser-warning': 'true'
+      'ngrok-skip-browser-warning': 'true',
+      ...getAuthHeaders()
     }
   });
   if (!res.ok) throw new Error(`transactions ${res.status}`);
@@ -132,7 +134,7 @@ export async function getTransactionStatus(transactionId: string) {
 export async function cancelPayment(transactionId: string) {
   const res = await fetch(`${API}/payments/${transactionId}/cancel`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }
   });
   if (!res.ok) throw new Error(`cancel ${res.status}`);
   return schemas.cancelRes.parse(await res.json());
@@ -142,17 +144,17 @@ export async function estimatePaymentCost(args: {
   amount: { value: number; currency: string };
   encryptedCardNumber: string;
   reference: string;
-  shopperCountry: string;
+  country: string;
   transactionId: string;
 }) {
   const res = await fetch(`${API}/payments/cost-estimate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({
       amount: args.amount,
       encryptedCardNumber: args.encryptedCardNumber,
       reference: args.reference,
-      shopperCountry: args.shopperCountry,
+      country: args.country,
       transactionId: args.transactionId
     })
   });

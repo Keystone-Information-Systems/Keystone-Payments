@@ -22,6 +22,9 @@ public sealed class NotificationRequestItem
     [JsonPropertyName("success")]
     public string? Success { get; set; }
 
+    [JsonPropertyName("merchantAccount")]
+    public string? MerchantAccount { get; set; }
+
     [JsonPropertyName("merchantAccountCode")]
     public string? MerchantAccountCode { get; set; }
 

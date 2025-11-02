@@ -7,6 +7,9 @@ using KeyPay.Infrastructure.Resilience;
 using KeyPay.Infrastructure.Idempotency;
 using KeyPay.Application;
 using System.Diagnostics;
+using KeyPay.Api;
+using KeyPay.Infrastructure.Secrets;
+using Amazon.SecretsManager;
  
  
 
@@ -25,8 +28,30 @@ builder.Services.AddLogging(logging =>
     logging.AddLambdaLogger();
 });
 
-// Database
-builder.Services.AddSingleton(new Db(builder.Configuration.GetConnectionString("Postgres") ?? "Host=localhost;Username=postgres;Password=postgres;Database=KeyPay"));
+// Database (prefer RDS secret if provided)
+string BuildConnString()
+{
+    var rdsSecret = builder.Configuration["Rds:SecretName"] ?? builder.Configuration["Rds__SecretName"];
+    if (!string.IsNullOrWhiteSpace(rdsSecret))
+    {
+        try
+        {
+            var sm = new Amazon.SecretsManager.AmazonSecretsManagerClient();
+            var res = sm.GetSecretValueAsync(new Amazon.SecretsManager.Model.GetSecretValueRequest { SecretId = rdsSecret }).GetAwaiter().GetResult();
+            using var doc = System.Text.Json.JsonDocument.Parse(res.SecretString);
+            var root = doc.RootElement;
+            var host = root.GetProperty("host").GetString();
+            var username = root.GetProperty("username").GetString();
+            var password = root.GetProperty("password").GetString();
+            var port = root.TryGetProperty("port", out var p) ? p.GetInt32() : 5432;
+            var dbname = root.TryGetProperty("dbname", out var d) ? d.GetString() : root.TryGetProperty("dbName", out var d2) ? d2.GetString() : null;
+            return $"Host={host};Username={username};Password={password};Port={port};Database={dbname}";
+        }
+        catch { }
+    }
+    return builder.Configuration.GetConnectionString("Postgres") ?? "Host=localhost;Username=postgres;Password=postgres;Database=KeyPay";
+}
+builder.Services.AddSingleton(new Db(BuildConnString()));
 
 // Idempotency
 builder.Services.AddScoped<IIdempotencyService, IdempotencyService>();
@@ -35,8 +60,12 @@ builder.Services.AddScoped<IIdempotencyService, IdempotencyService>();
 builder.Services.AddHttpClient<IAdyenClient, AdyenClient>(c =>
 {
     c.BaseAddress = new Uri(builder.Configuration["Adyen:BaseUrl"] ?? "https://checkout-test.adyen.com");
-    c.DefaultRequestHeaders.Add("X-API-Key", builder.Configuration["Adyen:ApiKey"] ?? "");
 });
+
+// Context and AWS services
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<IAmazonSecretsManager>(_ => new AmazonSecretsManagerClient());
+builder.Services.AddSingleton<ISecretsManager, AwsSecretsManager>();
 
 // Add CORS
 builder.Services.AddCors(options =>
@@ -55,12 +84,20 @@ builder.Services.AddCors(options =>
     });
 });
 
-builder.Services.AddAWSLambdaHosting(LambdaEventSource.HttpApi);
+builder.Services.AddAWSLambdaHosting(LambdaEventSource.RestApi);
+builder.Services.AddSingleton<JwtTokenService>();
 
 var app = builder.Build();
 
 // Run startup diagnostics
 KeyPay.Api.StartupDiagnostic.RunDiagnostics(app);
+// Ensure DB indexes (best-effort)
+try
+{
+    var dbForIndex = app.Services.GetRequiredService<Db>();
+    dbForIndex.EnsureIndexesAsync(default).GetAwaiter().GetResult();
+}
+catch { }
 
 
 // Simple test middleware
@@ -77,6 +114,49 @@ if (app.Environment.IsDevelopment())
 // Use CORS
 app.UseCors("AllowFrontend");
 
+// Tenant hydrate middleware: set AdyenApiKey and MerchantAccount from JWT for protected routes
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (path.Contains("/webhook", StringComparison.OrdinalIgnoreCase) || path.EndsWith("/paymentmethods", StringComparison.OrdinalIgnoreCase))
+    {
+        await next();
+        return;
+    }
+    var auth = context.Request.Headers["Authorization"].ToString();
+    if (!string.IsNullOrWhiteSpace(auth) && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+    {
+        try
+        {
+            var token = auth.Substring("Bearer ".Length).Trim();
+            var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+            var jwt = handler.ReadJwtToken(token);
+            var merchant = jwt.Claims.FirstOrDefault(c => c.Type == "merchantAccount")?.Value;
+            if (!string.IsNullOrWhiteSpace(merchant))
+            {
+                var db = context.RequestServices.GetRequiredService<Db>();
+                var secrets = context.RequestServices.GetRequiredService<KeyPay.Infrastructure.Secrets.ISecretsManager>();
+                var info = await db.GetTenantInfoByMerchantAccountAsync(merchant!, context.RequestAborted);
+                if (info is not null)
+                {
+                    var effectiveSecretName = string.IsNullOrWhiteSpace(info.Value.SecretName) ? $"tenant-{merchant}-config" : info.Value.SecretName;
+                    var secretJson = await secrets.GetSecretAsync(effectiveSecretName, context.RequestAborted);
+                    using var doc = System.Text.Json.JsonDocument.Parse(secretJson);
+                    var root = doc.RootElement;
+                    string? adyenApiKey = root.TryGetProperty("adyenAPIKey", out var apiKeyEl) ? apiKeyEl.GetString() : null;
+                    if (!string.IsNullOrWhiteSpace(adyenApiKey))
+                    {
+                        context.Items["AdyenApiKey"] = adyenApiKey!;
+                        context.Items["MerchantAccount"] = merchant!;
+                    }
+                }
+            }
+        }
+        catch { }
+    }
+    await next();
+});
+
 // Middleware
 app.UseMiddleware<ErrorHandlingMiddleware>();
 
@@ -84,8 +164,21 @@ app.UseMiddleware<ErrorHandlingMiddleware>();
 app.MapGet("/", () => "KeyPay API is running!");
 app.MapGet("/health", () => "OK");
 
+// CORS preflight for REST proxy
+app.MapMethods("/{**any}", new[] { "OPTIONS" }, () => Results.Ok());
+
+// Correlation ID middleware
+app.Use(async (context, next) =>
+{
+    var corr = context.Request.Headers["X-Correlation-ID"].ToString();
+    if (string.IsNullOrWhiteSpace(corr)) corr = Guid.NewGuid().ToString();
+    context.Items["CorrelationId"] = corr;
+    context.Response.Headers["X-Correlation-ID"] = corr;
+    await next();
+});
+
 // Cancel payment endpoint
-app.MapPost("/payments/{id:guid}/cancel", async (Guid id, Db db, ILogger<Program> logger, CancellationToken ct) =>
+app.MapPost("/payments/{id:guid}/cancel", async (Guid id, Db db, ILogger<Program> logger, HttpContext ctx, CancellationToken ct) =>
 {
     var correlationId = Guid.NewGuid().ToString();
     logger.LogInformation("Cancel payment request for transaction {TransactionId}. CorrelationId: {CorrelationId}", id, correlationId);
@@ -105,6 +198,13 @@ app.MapPost("/payments/{id:guid}/cancel", async (Guid id, Db db, ILogger<Program
         {
             logger.LogWarning("Transaction {TransactionId} not found for cancellation. CorrelationId: {CorrelationId}", id, correlationId);
             return Results.NotFound(new { message = "Transaction not found" });
+        }
+
+        // Tenant guard
+        var jwtTid = GetTenantIdFromJwt(ctx);
+        if (jwtTid is null || jwtTid.Value != transaction.Value.TenantId)
+        {
+            return Results.StatusCode(403);
         }
 
         // Check if already cancelled
@@ -189,6 +289,22 @@ app.MapGet("/debug/simple", () => new
     Environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Unknown"
 });
 
+// Helper to get tenantId from JWT (authorizer already validated signature)
+static Guid? GetTenantIdFromJwt(HttpContext ctx)
+{
+    try
+    {
+        var auth = ctx.Request.Headers["Authorization"].ToString();
+        if (string.IsNullOrWhiteSpace(auth) || !auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return null;
+        var token = auth.Substring("Bearer ".Length).Trim();
+        var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+        var jwt = handler.ReadJwtToken(token);
+        var t = jwt.Claims.FirstOrDefault(c => c.Type == "tenantId")?.Value;
+        return string.IsNullOrWhiteSpace(t) ? (Guid?)null : Guid.Parse(t);
+    }
+    catch { return null; }
+}
+
 // New endpoint: Retrieve previously stored payment methods data by orderId
 app.MapPost("/getpaymentMethods", async (Db db, HttpContext ctx, CancellationToken ct) =>
 {
@@ -207,6 +323,18 @@ app.MapPost("/getpaymentMethods", async (Db db, HttpContext ctx, CancellationTok
             return Results.BadRequest(new { error = "orderId is required" });
         }
         var orderId = orderIdEl.GetString();
+
+        // Tenant guard: ensure order belongs to JWT tenant
+        var jwtTid = GetTenantIdFromJwt(ctx);
+        if (jwtTid is null) return Results.StatusCode(403);
+        using (var c = db.Open())
+        {
+            var tid = await c.QuerySingleOrDefaultAsync<Guid?>("select tenantid from transactions where merchantreference=@ref limit 1", new { @ref = orderId });
+            if (tid is null || tid.Value == Guid.Empty || tid.Value != jwtTid.Value)
+            {
+                return Results.StatusCode(403);
+            }
+        }
 
         var data = await db.GetPaymentDataByOrderIdAsync(orderId!, ct);
         if (data is null)
@@ -294,6 +422,7 @@ app.MapPost("/paymentMethods", async (
     IIdempotencyService idempotency,
     ILogger<Program> logger,
     HttpContext ctx,
+    ISecretsManager secrets,
     CancellationToken ct) =>
 {
     var stopwatch = Stopwatch.StartNew();
@@ -348,19 +477,31 @@ app.MapPost("/paymentMethods", async (
         }
 
         logger.LogInformation("Step 1: Resolving tenant. CorrelationId: {CorrelationId}", correlationId);
-        // Get tenant ID from tenants table
-        var TId = await db.GetTenantIdByMerchantAccountAsync(req.MerchantAccount, ct);
-        if (TId == null)
+        var tenantInfo = await db.GetTenantInfoByMerchantAccountAsync(req.MerchantAccount, ct);
+        if (tenantInfo == null)
         {
             logger.LogWarning("Merchant account {MerchantAccount} not found. CorrelationId: {CorrelationId}", req.MerchantAccount, correlationId);
             return Results.BadRequest(new { error = "Merchant account not found", field = "merchantAccount" });
         }
-        var tenantId = TId.Value;
+        var tenantId = tenantInfo.Value.TenantId;
         if (tenantId == Guid.Empty)
         {
             logger.LogWarning("Merchant account {MerchantAccount} not found. CorrelationId: {CorrelationId}", req.MerchantAccount, correlationId);
             return Results.BadRequest(new { error = "Merchant account not found", field = "merchantAccount" });
         }
+
+        // Load tenant secret for Adyen keys
+        logger.LogInformation("Loading tenant secret for merchant {MerchantAccount}", req.MerchantAccount);
+        var effectiveSecretName = string.IsNullOrWhiteSpace(tenantInfo.Value.SecretName)
+            ? $"tenant-{req.MerchantAccount}-config"
+            : tenantInfo.Value.SecretName;
+        var secretJson = await secrets.GetSecretAsync(effectiveSecretName, ct);
+        using var secretDoc = System.Text.Json.JsonDocument.Parse(secretJson);
+        var secretRoot = secretDoc.RootElement;
+        string? adyenApiKey = secretRoot.TryGetProperty("adyenAPIKey", out var apiKeyEl) ? apiKeyEl.GetString() : null;
+        string? adyenClientKey = secretRoot.TryGetProperty("adyenClientKey", out var clientKeyEl) ? clientKeyEl.GetString() : null;
+        ctx.Items["AdyenApiKey"] = adyenApiKey ?? string.Empty;
+        ctx.Items["MerchantAccount"] = req.MerchantAccount;
 
         logger.LogInformation("Step 2: Generating idempotency key. CorrelationId: {CorrelationId}", correlationId);
         // Check idempotency - use OrderId for unique key
@@ -431,10 +572,19 @@ app.MapPost("/paymentMethods", async (
         // Persist returned payment methods JSON on the transaction for later retrieval
         await db.UpdatePaymentMethodsAsync(TxId, adyenResponse, ct);
 
-        logger.LogInformation("Step 4: Generating payment URL. CorrelationId: {CorrelationId}", correlationId);
-        // Generate payment URL with populated data
+        logger.LogInformation("Step 4: Generating auth code and payment URL. CorrelationId: {CorrelationId}", correlationId);
+        // Create short-lived auth code (2 minutes) for frontend exchange
+        await db.EnsureAuthCodesTableAsync(ct);
+        var authCode = Guid.NewGuid().ToString("N");
+        await db.CreateAuthCodeAsync(authCode, tenantId, req.MerchantAccount, effectiveSecretName, DateTimeOffset.UtcNow.AddMinutes(2), ct);
+
+        // Generate payment URL with populated data and auth code
         var frontendBaseUrl = app.Configuration["Frontend:BaseUrl"];
-        var paymentUrl = $"{frontendBaseUrl}/payment?orderId={req.OrderId}";
+        if (string.IsNullOrWhiteSpace(frontendBaseUrl))
+        {
+            return Results.BadRequest(new { error = "Frontend:BaseUrl not configured" });
+        }
+        var paymentUrl = $"{frontendBaseUrl}/payment?orderId={req.OrderId}&code={authCode}";
 
         var response = new
         {
@@ -443,7 +593,9 @@ app.MapPost("/paymentMethods", async (
             username = req.Username,
             email = req.Email,
             surcharge = new { amount = surchargeAmount, percent = req.SurchargePercent },
-            legacyPostUrl = req.LegacyPostUrl
+            legacyPostUrl = req.LegacyPostUrl,
+            authCode,
+            adyenClientKey = adyenClientKey ?? string.Empty
         };
 
         logger.LogInformation("Step 5: Caching response. CorrelationId: {CorrelationId}", correlationId);
@@ -466,12 +618,51 @@ app.MapPost("/paymentMethods", async (
 })
 .WithName("getpaymentMethods");
 
+// Exchange auth code for JWT and client key
+app.MapPost("/token/exchange", async (Db db, JwtTokenService jwt, ISecretsManager secrets, HttpContext ctx, CancellationToken ct) =>
+{
+    try
+    {
+        using var reader = new StreamReader(ctx.Request.Body);
+        var body = await reader.ReadToEndAsync();
+        var doc = System.Text.Json.JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body);
+        var root = doc.RootElement;
+        var code = root.TryGetProperty("code", out var c) ? c.GetString() : null;
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return Results.BadRequest(new { error = "code is required" });
+        }
+        var consumed = await db.ConsumeAuthCodeAsync(code!, ct);
+        if (consumed is null)
+        {
+            return Results.BadRequest(new { error = "invalid_or_expired_code" });
+        }
+        var (tenantId, merchantAccount, secretName) = consumed.Value;
+        var effectiveSecretName = string.IsNullOrWhiteSpace(secretName)
+            ? $"tenant-{merchantAccount}-config"
+            : secretName;
+        var token = await jwt.IssueAsync(tenantId, merchantAccount, TimeSpan.FromMinutes(10), ct);
+
+        var secretJson = await secrets.GetSecretAsync(effectiveSecretName, ct);
+        using var secretDoc = System.Text.Json.JsonDocument.Parse(secretJson);
+        var secretRoot = secretDoc.RootElement;
+        string? adyenClientKey = secretRoot.TryGetProperty("adyenClientKey", out var clientKeyEl) ? clientKeyEl.GetString() : null;
+
+        return Results.Ok(new { token, adyenClientKey, expiresIn = 600 });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.Message);
+    }
+});
+
 app.MapPost("/payments", async (
     CreatePaymentRequest req,
     IAdyenClient adyen,
     Db db,
     IIdempotencyService idempotency,
     ILogger<Program> logger,
+    HttpContext ctx,
     CancellationToken ct) =>
 {
     var stopwatch = Stopwatch.StartNew();
@@ -537,9 +728,11 @@ app.MapPost("/payments", async (
             logger.LogWarning("Transaction not found for reference {Reference}. CorrelationId: {CorrelationId}", (string)req.Reference, correlationId);
             return Results.BadRequest(new { error = "Transaction not found. Please call /paymentMethods first.", field = "reference" });
         }
-        else
+        // Tenant guard
+        var jwtTenantId = GetTenantIdFromJwt(ctx);
+        if (jwtTenantId is null || jwtTenantId.Value != row.Value.TenantId)
         {
-            var (tranId, tid) = row.Value;
+            return Results.StatusCode(403);
         }
 
 
@@ -584,7 +777,8 @@ app.MapPost("/payments", async (
             res.Raw,
             ct);
 
-        var provisional = res.ResultCode.Equals("Authorised", StringComparison.OrdinalIgnoreCase);
+        var isFinal = res.Action is null && (res.ResultCode?.Equals("Authorised", StringComparison.OrdinalIgnoreCase) == true);
+        var provisional = !isFinal;
         var statusCheckUrl = $"/transactions/{txId}";
 
         object response = res.Action is not null
@@ -610,11 +804,39 @@ app.MapPost("/payments", async (
 })
 .WithName("CreatePayment");
 
+// Additional details (3DS) endpoint
+app.MapPost("/payments/details", async (
+    HttpContext ctx,
+    IAdyenClient adyen,
+    ILogger<Program> logger,
+    CancellationToken ct) =>
+{
+    try
+    {
+        using var sr = new StreamReader(ctx.Request.Body);
+        var raw = await sr.ReadToEndAsync();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return Results.BadRequest(new { error = "Empty body" });
+        }
+        using var doc = System.Text.Json.JsonDocument.Parse(raw);
+        var payload = doc.RootElement.Clone();
+        var res = await adyen.SubmitPaymentDetailsAsync(payload, ct);
+        return Results.Ok(res);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "payments/details failed");
+        throw;
+    }
+});
+
 app.MapPost("/payments/cost-estimate", async (
     CostEstimateRequest req,
     IAdyenClient adyen,
     Db db,
     ILogger<Program> logger,
+    HttpContext ctx,
     CancellationToken ct) =>
 {
     var correlationId = Guid.NewGuid().ToString();
@@ -635,13 +857,17 @@ app.MapPost("/payments/cost-estimate", async (
 
         // Verify transaction exists and load base amount and current surcharge
         using var c = db.Open();
-        var tx = await c.QuerySingleOrDefaultAsync<(Guid TransactionId, long AmountValue, long Surcharge)?> (
+        var tx = await c.QuerySingleOrDefaultAsync<(Guid TransactionId, long AmountValue, long Surcharge)?>(
             "select transactionId, coalesce(amountValue, 0) as amountValue, coalesce(surcharge, 0) as surcharge from transactions where transactionId=@id",
             new { id = req.TransactionId });
         if (tx is null)
         {
             return Results.BadRequest(new { error = "Transaction not found" });
         }
+        // Tenant guard
+        var txTenant = await c.QuerySingleOrDefaultAsync<Guid?>("select tenantid from transactions where transactionid=@id", new { id = req.TransactionId });
+        var jwtTid = GetTenantIdFromJwt(ctx);
+        if (jwtTid is null || txTenant is null || jwtTid.Value != txTenant.Value) { return Results.StatusCode(403); }
 
         // Call Adyen BinLookup getCostEstimate using encryptedCardNumber
         var adyenResp = await adyen.GetCostEstimateAsync(
@@ -687,7 +913,7 @@ app.MapPost("/payments/cost-estimate", async (
 })
 .WithName("GetCostEstimate");
 
-app.MapGet("/transactions/{id:guid}", async (Guid id, Db db, ILogger<Program> logger, CancellationToken ct) =>
+app.MapGet("/transactions/{id:guid}", async (Guid id, Db db, ILogger<Program> logger, HttpContext ctx, CancellationToken ct) =>
 {
     var correlationId = Guid.NewGuid().ToString();
     logger.LogInformation("Get transaction request for ID {TransactionId}. CorrelationId: {CorrelationId}", id, correlationId);
@@ -702,6 +928,9 @@ app.MapGet("/transactions/{id:guid}", async (Guid id, Db db, ILogger<Program> lo
             logger.LogWarning("Transaction {TransactionId} not found. CorrelationId: {CorrelationId}", id, correlationId);
             return Results.NotFound();
         }
+        // Tenant guard
+        var jwtTid = GetTenantIdFromJwt(ctx);
+        if (jwtTid is null || jwtTid.Value != (Guid)row.tenantId) { return Results.StatusCode(403); }
 
         // Include line items in the response
         var items = await db.GetLineItemsAsync(id, ct);

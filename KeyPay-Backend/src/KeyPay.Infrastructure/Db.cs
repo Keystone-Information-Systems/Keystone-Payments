@@ -87,6 +87,79 @@ public sealed class Db(string connStr)
         });
     }
 
+    public async Task<(Guid TenantId, string SecretName)?> GetTenantInfoByMerchantAccountAsync(string merchantAccount, CancellationToken ct)
+    {
+        return await ExecuteWithRetryAsync(async () =>
+        {
+            using var c = Open();
+            var row = await c.QuerySingleOrDefaultAsync<(Guid TenantId, string SecretName)?>(
+                "select tenantid as TenantId, secret_name as SecretName from tenants where merchantaccount = @merchantAccount",
+                new { merchantAccount });
+            return row;
+        });
+    }
+
+    public async Task EnsureAuthCodesTableAsync(CancellationToken ct)
+    {
+        await ExecuteWithRetryAsync(async () =>
+        {
+            using var c = Open();
+            await c.ExecuteAsync(
+                """
+                create table if not exists auth_codes (
+                    code text primary key,
+                    tenantid uuid not null,
+                    merchantaccount text not null,
+                    secret_name text not null,
+                    created_at timestamptz not null default now(),
+                    expires_at timestamptz not null,
+                    used boolean not null default false
+                );
+                """
+            );
+        });
+    }
+
+    public async Task CreateAuthCodeAsync(string code, Guid tenantId, string merchantAccount, string secretName, DateTimeOffset expiresAt, CancellationToken ct)
+    {
+        await ExecuteWithRetryAsync(async () =>
+        {
+            using var c = Open();
+            await c.ExecuteAsync(
+                """
+                insert into auth_codes(code, tenantid, merchantaccount, secret_name, expires_at, used)
+                values (@code, @tenantId, @merchantAccount, @secretName, @expiresAt, false)
+                on conflict (code) do update set tenantid=excluded.tenantid, merchantaccount=excluded.merchantaccount, secret_name=excluded.secret_name, expires_at=excluded.expires_at, used=false;
+                """,
+                new { code, tenantId, merchantAccount, secretName, expiresAt = expiresAt.UtcDateTime });
+        });
+    }
+
+    public async Task<(Guid TenantId, string MerchantAccount, string SecretName)?> ConsumeAuthCodeAsync(string code, CancellationToken ct)
+    {
+        return await ExecuteWithRetryAsync(async () =>
+        {
+            using var c = Open();
+            using var tx = c.BeginTransaction();
+            var row = await c.QuerySingleOrDefaultAsync<(Guid TenantId, string MerchantAccount, string SecretName)?>(
+                """
+                select tenantid as TenantId, merchantaccount as MerchantAccount, secret_name as SecretName
+                from auth_codes
+                where code = @code and used = false and expires_at > now()
+                for update
+                """,
+                new { code }, tx);
+            if (row is null)
+            {
+                tx.Rollback();
+                return null;
+            }
+            await c.ExecuteAsync("update auth_codes set used = true where code = @code", new { code }, tx);
+            tx.Commit();
+            return row;
+        });
+    }
+
     public async Task CreatePendingAsync(Guid id, Guid tenantId, string reference, long amountMinor, string currency, string? idempotencyKey, string? username, string? email, CancellationToken ct)
     {
         await ExecuteWithRetryAsync(async () =>
@@ -246,6 +319,20 @@ public sealed class Db(string connStr)
 
 
 
+    public async Task EnsureIndexesAsync(CancellationToken ct)
+    {
+        await ExecuteWithRetryAsync(async () =>
+        {
+            using var c = Open();
+            await c.ExecuteAsync(
+                """
+                create index if not exists idx_transactions_merchantreference on transactions(merchantreference);
+                create index if not exists idx_transactions_tenantid on transactions(tenantid);
+                create index if not exists idx_ops_txid on operations(transactionid);
+                """
+            );
+        });
+    }
     public async Task<PaymentData?> GetPaymentDataByOrderIdAsync(string orderId, CancellationToken ct)
     {
         return await ExecuteWithRetryAsync(async () =>

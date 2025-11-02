@@ -12,6 +12,7 @@ type Props = {
   getSubmitAmount?: () => { value: number; currency: string };
   countryCode: string;
   transactionId?: string;
+  clientKey?: string;
   cardHolderName?: string;
   onRequireHolderName?: () => void;
   onFinalResult: (r: { resultCode?: string; pspReference?: string; txId?: string; provisional?: boolean; statusCheckUrl?: string }) => void;
@@ -25,6 +26,7 @@ export default function AdyenDropin({
   getSubmitAmount,
   countryCode,
   transactionId,
+  clientKey,
   cardHolderName,
   onRequireHolderName,
   onFinalResult,
@@ -48,7 +50,7 @@ export default function AdyenDropin({
         const { paymentMethodsResponse: pm, reference: ref, amount: amt, countryCode: cc } = initialPropsRef.current;
         const checkout = await AdyenCheckout({
           environment: import.meta.env.VITE_ADYEN_ENVIRONMENT || 'test',
-          clientKey: import.meta.env.VITE_ADYEN_CLIENT_KEY,
+          clientKey: (typeof clientKey === 'string' && clientKey) ? clientKey : import.meta.env.VITE_ADYEN_CLIENT_KEY,
           paymentMethodsResponse: pm,
           // Provide amount so the Pay button shows the total
           amount: (getSubmitAmount?.() ?? amt),
@@ -117,7 +119,7 @@ export default function AdyenDropin({
     })();
 
     return () => { try { dropin?.unmount?.(); } finally { dropinRef.current = null; } };
-  }, []);
+  }, [clientKey]);
 
   return <div ref={containerRef} id="dropin" />;
 }

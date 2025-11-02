@@ -8,11 +8,16 @@ import { formatCurrency } from '@/utils/formatters';
 import { Box, Typography, List, ListItem, ListItemText, TextField, Divider, Alert, Paper, Button, Stack } from '@mui/material';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import { exchangeAuthCode } from '@/services/authService';
+import { getAuthToken, setAuthToken } from '@/stores/auth';
 
 export default function NewPaymentPage() {
   const [sp] = useSearchParams();
   const navigate = useNavigate();
   const orderId = sp.get('orderId');
+  const code = sp.get('code');
+  const [clientKey, setClientKey] = useState<string | undefined>(undefined);
+  const [ready, setReady] = useState<boolean>(false);
 
   // Hooks must be called unconditionally and before any early returns
   const [holderName, setHolderName] = useState<string>('');
@@ -26,13 +31,34 @@ export default function NewPaymentPage() {
   const totalToSendMinorRef = useRef<number>(0);
 
   useEffect(() => {
-    if (!orderId) navigate('/'); // prevent loops via router config
-  }, [orderId, navigate]);
+    (async () => {
+      if (!orderId) { navigate('/'); return; }
+      // If we have a code, exchange it before making secured calls
+      try {
+        if (code) {
+          const { token, adyenClientKey } = await exchangeAuthCode(code);
+          setAuthToken(token);
+          setClientKey(adyenClientKey);
+          // Clean URL: remove code param
+          const url = new URL(window.location.href);
+          url.searchParams.delete('code');
+          window.history.replaceState({}, '', url.toString());
+        } else {
+          // Initialize clientKey if backend provided it earlier via build-time env; otherwise wait for server data
+          setClientKey(undefined);
+        }
+      } catch (e) {
+        console.error('Auth code exchange failed', e);
+      } finally {
+        setReady(true);
+      }
+    })();
+  }, [orderId, code, navigate]);
   
   const { data, isLoading, error } = useQuery({
     queryKey: ['pm', orderId],
     queryFn: () => getPaymentMethods({ orderId: orderId! }),
-    enabled: !!orderId
+    enabled: !!orderId && !!getAuthToken() && ready
   });
 
   // Sync holder name from server once data loads (handle null/undefined)
@@ -211,6 +237,7 @@ export default function NewPaymentPage() {
         transactionId={existingTransactionId}
         getSubmitAmount={() => ({ value: totalToPayMinor, currency: amount.currency })}
         countryCode={countryCode}
+        clientKey={clientKey}
         cardHolderName={holderName || undefined}
         onRequireHolderName={() => setShowNameWarning(true)}
         onFinalResult={(r) => {

@@ -4,8 +4,10 @@ using System.Text.Json;
 using System.Diagnostics;
 using Dapper;
 using KeyPay.Infrastructure;
+using Amazon.SecretsManager;
+using Amazon.SecretsManager.Model;
 
-//[assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
+[assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
 namespace KeyPay.Webhook;
 
 public class Function
@@ -14,11 +16,23 @@ public class Function
     private readonly bool _enableDbWrites;
     private readonly bool _requireValidHmac;
     private readonly string? _postgresConnectionString;
+    private static readonly IAmazonSecretsManager _sm = new AmazonSecretsManagerClient();
+    private readonly Dictionary<string, string> _hmacCache = new(StringComparer.OrdinalIgnoreCase);
 
     public Function()
     {
         _hmacKey = Environment.GetEnvironmentVariable("Adyen__HmacKey") ?? "";
-        _postgresConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Postgres");
+
+        var rdsSecretName = Environment.GetEnvironmentVariable("Rds__SecretName");
+        if (!string.IsNullOrWhiteSpace(rdsSecretName))
+        {
+            try { _postgresConnectionString = BuildPostgresConnectionStringFromSecretAsync(rdsSecretName).GetAwaiter().GetResult(); }
+            catch { _postgresConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Postgres"); }
+        }
+        else
+        {
+            _postgresConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Postgres");
+        }
 
         var enableDb = Environment.GetEnvironmentVariable("Webhooks__EnableDbWrites");
         _enableDbWrites = bool.TryParse(enableDb, out var parsedEnableDb) && parsedEnableDb;
@@ -32,9 +46,8 @@ public class Function
         var correlationId = Guid.NewGuid().ToString();
         var stopwatch = Stopwatch.StartNew();
         
-        ctx.Logger.LogInformation("Webhook request started. CorrelationId: {CorrelationId}", correlationId);
-        ctx.Logger.LogInformation("Request details - Method: {Method}, Path: {Path}, Headers: {Headers}", 
-            req.HttpMethod, req.Path, string.Join(", ", req.Headers?.Select(h => $"{h.Key}={h.Value}") ?? new string[0]));
+        Log.Info(ctx, $"Webhook request started. CorrelationId: {correlationId}");
+        Log.Info(ctx, $"Request details - Method: {req.HttpMethod}, Path: {req.Path}");
         
         try
         {
@@ -49,7 +62,7 @@ public class Function
 
             if (notification?.NotificationItems == null || notification.NotificationItems.Count == 0)
             {
-                ctx.Logger.LogWarning("No notificationItems in payload. CorrelationId: {CorrelationId}", correlationId);
+                Log.Warn(ctx, $"No notificationItems in payload. CorrelationId: {correlationId}");
                 stopwatch.Stop();
                 return new APIGatewayProxyResponse 
                 { 
@@ -65,14 +78,17 @@ public class Function
                 var item = container?.Item;
                 if (item == null)
                 {
-                    ctx.Logger.LogWarning("Notification item missing. CorrelationId: {CorrelationId}", correlationId);
+                    Log.Warn(ctx, $"Notification item missing. CorrelationId: {correlationId}");
                     continue;
                 }
 
-                var isValid = AdyenHmacValidator.Verify(item, _hmacKey);
+                // Choose per-tenant HMAC if available
+                var merchantAcct = item.MerchantAccount ?? item.MerchantAccountCode;
+                var hmacToUse = await GetTenantHmacKeyAsync(merchantAcct ?? string.Empty) ?? _hmacKey;
+                var isValid = AdyenHmacValidator.Verify(item, hmacToUse);
                 if (!isValid)
                 {
-                    ctx.Logger.LogWarning("Invalid HMAC for event {EventCode} PSP {PspReference}. CorrelationId: {CorrelationId}", item.EventCode, item.PspReference, correlationId);
+                    Log.Warn(ctx, $"Invalid HMAC for event {item.EventCode} PSP {item.PspReference} merchant {merchantAcct}. CorrelationId: {correlationId}");
                     if (_requireValidHmac)
                     {
                         // Skip processing but still acknowledge overall
@@ -81,9 +97,7 @@ public class Function
                     // Proceeding because RequireValidHmac=false
                 }
 
-                ctx.Logger.LogInformation(
-                    "Valid webhook item. EventCode: {EventCode}, Success: {Success}, PSP: {PspReference}, Original: {OriginalReference}, MerchantRef: {MerchantReference}. CorrelationId: {CorrelationId}",
-                    item.EventCode, item.Success, item.PspReference, item.OriginalReference, item.MerchantReference, correlationId);
+                Log.Info(ctx, $"Valid webhook item. EventCode: {item.EventCode}, Success: {item.Success}, PSP: {item.PspReference}, Original: {item.OriginalReference}, MerchantRef: {item.MerchantReference}. CorrelationId: {correlationId}");
 
                 if (!_enableDbWrites)
                 {
@@ -92,7 +106,7 @@ public class Function
 
                 if (string.IsNullOrEmpty(_postgresConnectionString))
                 {
-                    ctx.Logger.LogWarning("DB writes enabled but no ConnectionStrings__Postgres provided. CorrelationId: {CorrelationId}", correlationId);
+                    Log.Warn(ctx, $"DB writes enabled but no ConnectionStrings__Postgres provided. CorrelationId: {correlationId}");
                     continue;
                 }
 
@@ -121,6 +135,7 @@ public class Function
 
                         if (status != null)
                         {
+                            using var payloadDoc = JsonDocument.Parse(payload);
                             await db.UpdateStatusWithOperationAsync(
                                 txId,
                                 status,
@@ -131,18 +146,17 @@ public class Function
                                 $"WEBHOOK_{item.EventCode}",
                                 null,
                                 null,
-                                payload,
+                                payloadDoc.RootElement,
                                 default);
 
-                            ctx.Logger.LogInformation("Transaction {TxId} updated to status {Status} from webhook", txId, status);
+                            Log.Info(ctx, $"Transaction {txId} updated to status {status} from webhook");
                         }
                     }
                 }
             }
 
             stopwatch.Stop();
-            ctx.Logger.LogInformation("Webhook processed in {Duration}ms. CorrelationId: {CorrelationId}", 
-                stopwatch.ElapsedMilliseconds, correlationId);
+            Log.Info(ctx, $"Webhook processed in {stopwatch.ElapsedMilliseconds}ms. CorrelationId: {correlationId}");
 
             return new APIGatewayProxyResponse 
             { 
@@ -154,8 +168,7 @@ public class Function
         catch (Exception ex)
         {
             stopwatch.Stop();
-            ctx.Logger.LogError(ex, "Webhook processing failed after {Duration}ms. CorrelationId: {CorrelationId}", 
-                stopwatch.ElapsedMilliseconds, correlationId);
+            Log.Error(ctx, $"Webhook processing failed after {stopwatch.ElapsedMilliseconds}ms. CorrelationId: {correlationId}. Error: {ex.Message}");
             
             // Always acknowledge to avoid retries; errors are logged for investigation
             return new APIGatewayProxyResponse 
@@ -166,5 +179,58 @@ public class Function
             };
         }
     }
+
+    private async Task<string?> GetTenantHmacKeyAsync(string merchantAccount)
+    {
+        if (string.IsNullOrWhiteSpace(merchantAccount) || string.IsNullOrWhiteSpace(_postgresConnectionString)) return null;
+        if (_hmacCache.TryGetValue(merchantAccount, out var cached)) return cached;
+
+        var db = new Db(_postgresConnectionString);
+        using var c = db.Open();
+        var secretName = await c.QuerySingleOrDefaultAsync<string?>(
+            "select case when coalesce(nullif(secret_name,''), '') <> '' then secret_name else 'tenant-' || @m || '-config' end from tenants where merchantaccount=@m",
+            new { m = merchantAccount });
+        if (string.IsNullOrWhiteSpace(secretName)) return null;
+
+        try
+        {
+            var res = await _sm.GetSecretValueAsync(new GetSecretValueRequest { SecretId = secretName });
+            using var doc = JsonDocument.Parse(res.SecretString);
+            if (doc.RootElement.TryGetProperty("adyenHmacKey", out var hk))
+            {
+                var key = hk.GetString();
+                if (!string.IsNullOrWhiteSpace(key))
+                {
+                    _hmacCache[merchantAccount] = key!;
+                    return key;
+                }
+            }
+        }
+        catch
+        {
+            // fall back to env-provided HMAC in caller
+        }
+        return null;
+    }
+
+    private static async Task<string> BuildPostgresConnectionStringFromSecretAsync(string secretName)
+    {
+        var res = await _sm.GetSecretValueAsync(new GetSecretValueRequest { SecretId = secretName });
+        using var doc = JsonDocument.Parse(res.SecretString);
+        var root = doc.RootElement;
+        var host = root.GetProperty("host").GetString();
+        var username = root.GetProperty("username").GetString();
+        var password = root.GetProperty("password").GetString();
+        var port = root.TryGetProperty("port", out var p) ? p.GetInt32() : 5432;
+        var dbname = root.TryGetProperty("dbname", out var d) ? d.GetString() : root.TryGetProperty("dbName", out var d2) ? d2.GetString() : null;
+        return $"Host={host};Username={username};Password={password};Port={port};Database={dbname}";
+    }
+}
+
+static class Log
+{
+    public static void Info(ILambdaContext ctx, string msg) => ctx.Logger.LogLine($"INFO  {msg}");
+    public static void Warn(ILambdaContext ctx, string msg) => ctx.Logger.LogLine($"WARN  {msg}");
+    public static void Error(ILambdaContext ctx, string msg) => ctx.Logger.LogLine($"ERROR {msg}");
 }
 
