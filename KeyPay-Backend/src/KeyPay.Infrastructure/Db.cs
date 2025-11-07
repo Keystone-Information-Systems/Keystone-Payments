@@ -140,7 +140,20 @@ public sealed class Db(string connStr)
         return await ExecuteWithRetryAsync(async () =>
         {
             using var c = Open();
-            using var tx = c.BeginTransaction();
+            IDbTransaction? tx = null;
+            try
+            {
+                if (c is NpgsqlConnection npg)
+                {
+                    await npg.OpenAsync(ct);
+                    tx = await npg.BeginTransactionAsync(ct);
+                }
+                else
+                {
+                    c.Open();
+                    tx = c.BeginTransaction();
+                }
+
             var row = await c.QuerySingleOrDefaultAsync<(Guid TenantId, string MerchantAccount, string SecretName)?>(
                 """
                 select tenantid as TenantId, merchantaccount as MerchantAccount, secret_name as SecretName
@@ -149,14 +162,27 @@ public sealed class Db(string connStr)
                 for update
                 """,
                 new { code }, tx);
+
             if (row is null)
             {
-                tx.Rollback();
+                if (tx is NpgsqlTransaction ntx) await ntx.RollbackAsync(ct); else tx?.Rollback();
                 return null;
             }
+
             await c.ExecuteAsync("update auth_codes set used = true where code = @code", new { code }, tx);
-            tx.Commit();
+
+                if (tx is NpgsqlTransaction ntx2) await ntx2.CommitAsync(ct); else tx?.Commit();
             return row;
+            }
+            catch
+            {
+                try { if (tx is NpgsqlTransaction ntx3) await ntx3.RollbackAsync(ct); else tx?.Rollback(); } catch { }
+                throw;
+            }
+            finally
+            {
+                if (tx is System.IAsyncDisposable ad) await ad.DisposeAsync(); else tx?.Dispose();
+            }
         });
     }
 

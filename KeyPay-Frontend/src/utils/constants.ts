@@ -45,7 +45,7 @@ export const COUNTRIES = {
 export const APP_CONFIG = {
   NAME: import.meta.env.VITE_APP_NAME || 'KeyPay',
   VERSION: import.meta.env.VITE_APP_VERSION || '1.0.0',
-  API_BASE_URL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000', // Match backend actual port
+  API_BASE_URL: import.meta.env.VITE_API_BASE_URL || 'https://t90bvzrzc3.execute-api.us-east-1.amazonaws.com/dev/api', // Match backend actual port
   ADYEN_CLIENT_KEY: import.meta.env.VITE_ADYEN_CLIENT_KEY || '',
   ENVIRONMENT: import.meta.env.VITE_ENVIRONMENT || 'test',
 } as const;

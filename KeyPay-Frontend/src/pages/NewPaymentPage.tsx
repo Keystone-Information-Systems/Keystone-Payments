@@ -91,6 +91,7 @@ export default function NewPaymentPage() {
   }
 
   const { paymentMethods, reference, amount, countryCode, lineItems = [], username, email, transactionId, surcharge } = data;
+  const legacyPostUrl: string | undefined = (data as any)?.legacyPostUrl;
   const itemsTotalMinor = lineItems.reduce((sum: number, li: any) => sum + (li?.amountValue ?? 0), 0);
   const baseTotalMinor = amount?.value ?? itemsTotalMinor;
   // Use backend-provided surcharge amount if available
@@ -263,25 +264,44 @@ export default function NewPaymentPage() {
                 }
               );
             } else if (rc === 'authorised' || rc === 'authorized') {
+              // Redirect back to legacy system on Authorised
+              if (legacyPostUrl) {
+                const used = totalToSendMinorRef.current;
+                const totalMinor = used != null ? used : (amount?.value ?? 0);
+                const surAmt = (data as any)?.surcharge?.amount ?? 0;
+                const inputVal = [
+                  'Authorised',
+                  reference,
+                  r.txId || existingTransactionId,
+                  r.pspReference || '',
+                  String(totalMinor),
+                  amount?.currency,
+                  String(surAmt),
+                  new Date().toISOString()
+                ].join('|');
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = legacyPostUrl;
+                form.style.display = 'none';
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'payload';
+                input.value = inputVal;
+                form.appendChild(input);
+                document.body.appendChild(form);
+                form.submit();
+                return;
+              }
+              // Fallback to internal success page if no legacyPostUrl
               const qp = new URLSearchParams();
               if (r.txId) qp.set('transactionId', r.txId);
               if (r.pspReference) qp.set('pspReference', r.pspReference);
-              // pass order reference and amount context as fallbacks for the success page
               if (reference) qp.set('reference', reference);
               const used = totalToSendMinorRef.current;
               if (used != null) qp.set('amountMinor', String(used));
               if (amount?.currency) qp.set('currency', amount.currency);
               const qs = qp.toString();
-              navigate(`/payment/success${qs ? `?${qs}` : ''}`,
-                { state: {
-                    transactionId: r.txId,
-                    pspReference: r.pspReference,
-                    reference,
-                    amountMinor: used,
-                    currency: amount?.currency
-                  }
-                }
-              );
+              navigate(`/payment/success${qs ? `?${qs}` : ''}`, { state: { transactionId: r.txId, pspReference: r.pspReference, reference, amountMinor: used, currency: amount?.currency } });
             } else {
               const qp = new URLSearchParams();
               if (r.txId) qp.set('transactionId', r.txId);

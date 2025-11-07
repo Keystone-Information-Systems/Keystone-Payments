@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { getAuthHeaders } from '@/stores/auth';
 
-const API = import.meta.env.VITE_API_BASE;
+const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
 
 export const schemas = {
   paymentMethodsRes: z.object({
@@ -50,7 +50,7 @@ export const schemas = {
 };
 
 export async function getPaymentMethods(payload: { orderId: string }) {
-  const res = await fetch(`${API}/getpaymentMethods`, {
+  const res = await fetch(`${API_BASE}/getpaymentMethods`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({ orderId: payload.orderId })
@@ -68,7 +68,7 @@ export async function createPayment(args: {
   paymentMethod: any;
   cardHolderName?: string;
 }) {
-  const res = await fetch(`${API}/payments`, {
+  const res = await fetch(`${API_BASE}/payments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({
@@ -86,7 +86,7 @@ export async function createPayment(args: {
 }
 
 export async function submitAdditionalDetails(detailsPayload: any) {
-  const res = await fetch(`${API}/payments/details`, {
+  const res = await fetch(`${API_BASE}/payments/details`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(detailsPayload)
@@ -98,7 +98,7 @@ export async function submitAdditionalDetails(detailsPayload: any) {
 export async function getStatusByUrl(statusCheckUrl: string) {
   const url = /^https?:\/\//.test(statusCheckUrl)
     ? statusCheckUrl
-    : new URL(statusCheckUrl, API).toString();
+    : new URL(statusCheckUrl, API_BASE).toString();
   const res = await fetch(url, {
     headers: {
       'Accept': 'application/json',
@@ -115,7 +115,7 @@ export async function getStatusByUrl(statusCheckUrl: string) {
 }
 
 export async function getTransactionStatus(transactionId: string) {
-  const res = await fetch(`${API}/transactions/${transactionId}`, {
+  const res = await fetch(`${API_BASE}/transactions/${transactionId}`, {
     headers: {
       'Accept': 'application/json',
       'ngrok-skip-browser-warning': 'true',
@@ -132,7 +132,7 @@ export async function getTransactionStatus(transactionId: string) {
 }
 
 export async function cancelPayment(transactionId: string) {
-  const res = await fetch(`${API}/payments/${transactionId}/cancel`, {
+  const res = await fetch(`${API_BASE}/payments/${transactionId}/cancel`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }
   });
@@ -147,7 +147,7 @@ export async function estimatePaymentCost(args: {
   country: string;
   transactionId: string;
 }) {
-  const res = await fetch(`${API}/payments/cost-estimate`, {
+  const res = await fetch(`${API_BASE}/payments/cost-estimate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({
