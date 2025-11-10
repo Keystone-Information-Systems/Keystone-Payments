@@ -288,6 +288,22 @@ export default function NewPaymentPage() {
                 input.name = 'payload';
                 input.value = inputVal;
                 form.appendChild(input);
+                // add explicit fields for downstream parsing
+                const pmType = document.createElement('input');
+                pmType.type = 'hidden';
+                pmType.name = 'paymentMethodType';
+                pmType.value = (r as any)?.paymentMethodType || '';
+                form.appendChild(pmType);
+                const pmBrand = document.createElement('input');
+                pmBrand.type = 'hidden';
+                pmBrand.name = 'paymentMethodBrand';
+                pmBrand.value = (r as any)?.paymentMethodBrand || '';
+                form.appendChild(pmBrand);
+                const chnInput = document.createElement('input');
+                chnInput.type = 'hidden';
+                chnInput.name = 'cardHolderName';
+                chnInput.value = (r as any)?.cardHolderName || holderName || '';
+                form.appendChild(chnInput);
                 document.body.appendChild(form);
                 form.submit();
                 return;

@@ -15,7 +15,7 @@ type Props = {
   clientKey?: string;
   cardHolderName?: string;
   onRequireHolderName?: () => void;
-  onFinalResult: (r: { resultCode?: string; pspReference?: string; txId?: string; provisional?: boolean; statusCheckUrl?: string }) => void;
+  onFinalResult: (r: { resultCode?: string; pspReference?: string; txId?: string; provisional?: boolean; statusCheckUrl?: string; paymentMethodType?: string; paymentMethodBrand?: string; cardHolderName?: string }) => void;
   onError: (e: any) => void;
 };
 
@@ -36,6 +36,8 @@ export default function AdyenDropin({
   const dropinRef = useRef<any>(null);
   const holderNameRef = useRef<string | undefined>(cardHolderName);
   const initialPropsRef = useRef({ paymentMethodsResponse, reference, amount, countryCode, transactionId });
+  const selectedPaymentMethodTypeRef = useRef<string | undefined>(undefined);
+  const selectedPaymentMethodBrandRef = useRef<string | undefined>(undefined);
 
   // Keep latest holder name without remounting Drop-in on each keystroke
   useEffect(() => {
@@ -54,7 +56,13 @@ export default function AdyenDropin({
           paymentMethodsResponse: pm,
           // Provide amount so the Pay button shows the total
           amount: (getSubmitAmount?.() ?? amt),
-          onChange: () => {},
+          onChange: (state) => {
+            try {
+              const pmSel = (state as any)?.data?.paymentMethod;
+              if (pmSel?.type) selectedPaymentMethodTypeRef.current = pmSel.type; // e.g., "scheme", "ideal"
+              if (pmSel?.brand) selectedPaymentMethodBrandRef.current = pmSel.brand; // e.g., "visa", "mc"
+            } catch {}
+          },
           onError: (error) => {
             onError(error);
           },
@@ -85,7 +93,10 @@ export default function AdyenDropin({
                   pspReference: res.pspReference,
                   txId: (res as any).txId,
                   provisional: (res as any).provisional,
-                  statusCheckUrl: (res as any).statusCheckUrl
+                  statusCheckUrl: (res as any).statusCheckUrl,
+                  paymentMethodType: selectedPaymentMethodTypeRef.current,
+                  paymentMethodBrand: selectedPaymentMethodBrandRef.current,
+                  cardHolderName: holderNameRef.current
                 });
                 // Also surface the amount used via a custom event on the window for the parent to read if needed
                 try {
