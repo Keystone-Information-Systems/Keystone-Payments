@@ -55,7 +55,7 @@ public class Function
 
         try
         {
-            var headers = request.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var headers = new Dictionary<string, string>(request.Headers ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase);
             var path = GetPathFromMethodArn(request.MethodArn) ?? "/";
             var method = GetMethodFromMethodArn(request.MethodArn) ?? "";
             var sourceIp = GetSourceIp(request) ?? string.Empty;
@@ -64,7 +64,7 @@ public class Function
             // Bypass webhook and preflights/token
             if (string.Equals(method, "OPTIONS", StringComparison.OrdinalIgnoreCase) ||
                 path.Contains("/webhook", StringComparison.OrdinalIgnoreCase) ||
-                path.Equals("/token/exchange", StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase) && path.EndsWith("/token/exchange", StringComparison.OrdinalIgnoreCase)) ||
                 path.Equals("/", StringComparison.OrdinalIgnoreCase) ||
                 path.Equals("/health", StringComparison.OrdinalIgnoreCase))
             {
@@ -234,7 +234,9 @@ public class Function
         var ip = request?.RequestContext?.Identity?.SourceIp;
         if (!string.IsNullOrWhiteSpace(ip)) return ip;
 
-        var headers = request?.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var headers = request?.Headers != null
+            ? new Dictionary<string, string>(request.Headers, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (headers.TryGetValue("X-Forwarded-For", out var xff))
             return xff.Split(',').FirstOrDefault()?.Trim();
 
@@ -244,10 +246,14 @@ public class Function
     // NEW: merchantAccount from header or query
     private static string? GetMerchantAccountFromRequest(APIGatewayCustomAuthorizerRequest request)
     {
-        var headers = request.Headers ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var headers = request.Headers != null
+            ? new Dictionary<string, string>(request.Headers, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (headers.TryGetValue("x-merchant-account", out var fromHeader) && !string.IsNullOrWhiteSpace(fromHeader))
             return fromHeader.Trim();
-        var qs = request.QueryStringParameters ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var qs = request.QueryStringParameters != null
+            ? new Dictionary<string, string>(request.QueryStringParameters, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (qs.TryGetValue("merchantAccount", out var fromQs) && !string.IsNullOrWhiteSpace(fromQs))
             return fromQs.Trim();
         return null;
