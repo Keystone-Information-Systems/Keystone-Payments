@@ -4,6 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UserSecretsId>10e3b97c-c362-45cd-b0f8-d975c8590a86</UserSecretsId>
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Adyen" Version="10.*" />

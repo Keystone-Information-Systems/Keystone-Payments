@@ -50,9 +50,10 @@ export const schemas = {
 };
 
 export async function getPaymentMethods(payload: { orderId: string }) {
+  const auth = getAuthHeaders();
   const res = await fetch(`${API_BASE}/getpaymentMethods`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    headers: { 'Content-Type': 'application/json', ...auth },
     body: JSON.stringify({ orderId: payload.orderId })
   });
   if (!res.ok) throw new Error(`paymentMethods ${res.status}`);

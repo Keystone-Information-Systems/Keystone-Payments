@@ -6,6 +6,8 @@ using Dapper;
 using KeyPay.Infrastructure;
 using Amazon.SecretsManager;
 using Amazon.SecretsManager.Model;
+using Adyen.Model.Notification;
+using Adyen.Util;
 
 [assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
 namespace KeyPay.Webhook;
@@ -85,7 +87,29 @@ public class Function
                 // Choose per-tenant HMAC if available
                 var merchantAcct = item.MerchantAccount ?? item.MerchantAccountCode;
                 var hmacToUse = await GetTenantHmacKeyAsync(merchantAcct ?? string.Empty) ?? _hmacKey;
-                var isValid = AdyenHmacValidator.Verify(item, hmacToUse);
+                // Validate HMAC using Adyen SDK HmacValidator with SDK signing rules (HEX key)
+                static string Escape(string? v)
+                {
+                    if (string.IsNullOrEmpty(v)) return string.Empty;
+                    return v.Replace(@"\", @"\\").Replace(":", @"\:");
+                }
+                var amountValue = item.Amount?.Value?.ToString() ?? string.Empty;
+                var amountCurrency = item.Amount?.Currency ?? string.Empty;
+                var successStr = string.Equals(item.Success, "true", StringComparison.OrdinalIgnoreCase) ? "true" : "false";
+                var macString = string.Join(":", new[]
+                {
+                    Escape(item.PspReference),
+                    Escape(item.OriginalReference),
+                    Escape(item.MerchantAccountCode ?? item.MerchantAccount),
+                    Escape(item.MerchantReference),
+                    Escape(amountValue),
+                    Escape(amountCurrency),
+                    Escape(item.EventCode),
+                    Escape(successStr)
+                });
+                var expected = new HmacValidator().CalculateHmac(macString, hmacToUse);
+                var provided = item.AdditionalData?.HmacSignature ?? string.Empty;
+                var isValid = string.Equals(expected, provided, StringComparison.Ordinal);
                 if (!isValid)
                 {
                     Log.Warn(ctx, $"Invalid HMAC for event {item.EventCode} PSP {item.PspReference} merchant {merchantAcct}. CorrelationId: {correlationId}");
@@ -183,33 +207,50 @@ public class Function
     private async Task<string?> GetTenantHmacKeyAsync(string merchantAccount)
     {
         if (string.IsNullOrWhiteSpace(merchantAccount) || string.IsNullOrWhiteSpace(_postgresConnectionString)) return null;
-        if (_hmacCache.TryGetValue(merchantAccount, out var cached)) return cached;
+        if (_hmacCache.TryGetValue(merchantAccount, out var cached))
+        {
+            Console.WriteLine($"webhook: HMAC cache hit for merchant '{merchantAccount}'");
+            return cached;
+        }
 
         var db = new Db(_postgresConnectionString);
         using var c = db.Open();
         var secretName = await c.QuerySingleOrDefaultAsync<string?>(
             "select case when coalesce(nullif(secret_name,''), '') <> '' then secret_name else 'tenant-' || @m || '-config' end from tenants where merchantaccount=@m",
             new { m = merchantAccount });
+        Console.WriteLine($"webhook: resolved secretName for merchant '{merchantAccount}' => '{(secretName ?? "<none>")}'");
         if (string.IsNullOrWhiteSpace(secretName)) return null;
 
         try
         {
             var res = await _sm.GetSecretValueAsync(new GetSecretValueRequest { SecretId = secretName });
+            Console.WriteLine($"webhook: retrieved secret '{secretName}' for merchant '{merchantAccount}'");
             using var doc = JsonDocument.Parse(res.SecretString);
             if (doc.RootElement.TryGetProperty("adyenHmacKey", out var hk))
             {
                 var key = hk.GetString();
                 if (!string.IsNullOrWhiteSpace(key))
                 {
+                    Console.WriteLine($"webhook: adyenHmacKey found for merchant '{merchantAccount}', caching");
                     _hmacCache[merchantAccount] = key!;
                     return key;
                 }
+                else
+                {
+                    Console.WriteLine($"webhook: adyenHmacKey property empty for merchant '{merchantAccount}'");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"webhook: adyenHmacKey not present in secret '{secretName}' for merchant '{merchantAccount}'");
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // fall back to env-provided HMAC in caller
+            Console.WriteLine($"webhook: failed to read secret '{secretName}' for merchant '{merchantAccount}': {ex.Message}");
+            // fall back decision is made by caller based on _requireValidHmac
         }
+        Console.WriteLine($"webhook: returning null HMAC for merchant '{merchantAccount}'");
         return null;
     }
 
