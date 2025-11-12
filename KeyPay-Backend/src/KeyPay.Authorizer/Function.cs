@@ -109,12 +109,12 @@ public class Function
                         return Policy(principalId, "Deny", resource);
                     }
 
-                    var ipAllowlist = await GetTenantIpAllowlistAsync(secretName);
-                    if (!IsIpAllowed(sourceIp, ipAllowlist))
-                    {
-                        Console.WriteLine($"authorizer: deny: ip not allowed ({sourceIp})");
-                        return Policy(principalId, "Deny", resource);
-                    }
+                    // var ipAllowlist = await GetTenantIpAllowlistAsync(secretName);
+                    // if (!IsIpAllowed(sourceIp, ipAllowlist))
+                    // {
+                    //     Console.WriteLine($"authorizer: deny: ip not allowed ({sourceIp})");
+                    //     return Policy(principalId, "Deny", resource);
+                    // }
 
                     Console.WriteLine($"authorizer: allow: tenant={tenant.Value.TenantId} merchant={tenant.Value.MerchantAccount}");
                     principalId = tenant.Value.MerchantAccount;
@@ -158,12 +158,12 @@ public class Function
             var secretName2 = string.IsNullOrWhiteSpace(tenant2.Value.SecretName)
                 ? $"tenant-{tenant2.Value.MerchantAccount}-config"
                 : tenant2.Value.SecretName;
-            var ipAllowlist2 = await GetTenantIpAllowlistAsync(secretName2);
-            if (!IsIpAllowed(sourceIp, ipAllowlist2))
-            {
-                Console.WriteLine($"authorizer: deny: ip not allowed ({sourceIp})");
-                return Policy(principalId, "Deny", resource);
-            }
+            // var ipAllowlist2 = await GetTenantIpAllowlistAsync(secretName2);
+            // if (!IsIpAllowed(sourceIp, ipAllowlist2))
+            // {
+            //     Console.WriteLine($"authorizer: deny: ip not allowed ({sourceIp})");
+            //     return Policy(principalId, "Deny", resource);
+            // }
 
             // Defense-in-depth: ensure merchantAccount claim matches DB
             if (!string.Equals(merchant, tenant2.Value.MerchantAccount, StringComparison.OrdinalIgnoreCase))
@@ -308,24 +308,24 @@ public class Function
         return null;
     }
 
-    private async Task<string[]> GetTenantIpAllowlistAsync(string secretName)
-    {
-        var req = new GetSecretValueRequest { SecretId = secretName };
-        var res = await _secretsManager.GetSecretValueAsync(req);
-        var json = res.SecretString;
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        var ips = new List<string>();
-        if (root.TryGetProperty("ipAllowlist", out var ipArr) && ipArr.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var el in ipArr.EnumerateArray())
-            {
-                var v = el.GetString();
-                if (!string.IsNullOrWhiteSpace(v)) ips.Add(v);
-            }
-        }
-        return ips.ToArray();
-    }
+    // private async Task<string[]> GetTenantIpAllowlistAsync(string secretName)
+    // {
+    //     var req = new GetSecretValueRequest { SecretId = secretName };
+    //     var res = await _secretsManager.GetSecretValueAsync(req);
+    //     var json = res.SecretString;
+    //     using var doc = JsonDocument.Parse(json);
+    //     var root = doc.RootElement;
+    //     var ips = new List<string>();
+    //     if (root.TryGetProperty("ipAllowlist", out var ipArr) && ipArr.ValueKind == JsonValueKind.Array)
+    //     {
+    //         foreach (var el in ipArr.EnumerateArray())
+    //         {
+    //             var v = el.GetString();
+    //             if (!string.IsNullOrWhiteSpace(v)) ips.Add(v);
+    //         }
+    //     }
+    //     return ips.ToArray();
+    // }
 
     private async Task<string> GetJwtSettingsAsync()
     {
