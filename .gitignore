@@ -1,34 +1,81 @@
-# Root ignores for ValPay mono-repo
+# KeyPay Monorepo .gitignore
+# Structure:
+# - KeyPay-Backend/ (.NET 8 Lambda projects)
+# - KeyPay-Frontend/ (React app)
 
-# Env files
-.env
-*.env
-*.env.*.local
-ValPay-Frontend/.env
-ValPay-Frontend/.env.*
-
-# Backend local-only configs (not tracked)
-ValPay-Backend/src/**/appsettings.*.local.json
-ValPay-Backend/src/**/secrets*.json
-
-# Node / Frontend
-ValPay-Frontend/node_modules/
-ValPay-Frontend/dist/
-ValPay-Frontend/.vite/
-ValPay-Frontend/.cache/
-ValPay-Frontend/.turbo/
-
-# .NET build output
-ValPay-Backend/**/bin/
-ValPay-Backend/**/obj/
-ValPay-Backend/.vs/
-
-# IDE
-.vscode/
-.idea/
-
-# OS files
+## ----------------------------
+## Universal / OS-level files
+## ----------------------------
 .DS_Store
 Thumbs.db
+Desktop.ini
 
+## ----------------------------
+## IDE / Editor
+## ----------------------------
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
 
+## ----------------------------
+## Environment files
+## ----------------------------
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Optional backend-local config patterns
+appsettings.*.local.json
+**/secrets*.json
+
+## ----------------------------
+## Logs / Temp / Caches
+## ----------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.pid
+*.seed
+*.tsbuildinfo
+
+## ----------------------------
+## Backend (.NET 8 / Lambda)
+## ----------------------------
+bin/
+obj/
+publish/
+.vs/
+TestResults/
+Generated_Code/
+*.nupkg
+*.snupkg
+
+# Lambda deployment artifacts
+*.zip
+.aws-sam/
+.serverless/
+cdk.out/
+artifacts/
+
+## ----------------------------
+## Frontend (React)
+## ----------------------------
+node_modules/
+build/
+dist/
+.cache/
+.eslintcache
+.parcel-cache/
+.turbo/
+.vite/
+coverage/
+
+# Optional (in case of future framework changes)
+.next/
+storybook-static/

@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+# Cancel older runs of the same branch/PR to save CI minutes
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and Test (Backend + Frontend)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ---------------------------
+      # Backend (.NET 8) - Restore/Build/Test
+      # ---------------------------
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+          cache: true
+          cache-dependency-path: |
+            KeyPay-Backend/**/*.csproj
+            KeyPay-Backend/**/packages.lock.json
+            KeyPay-Backend/KeyPay.sln
+
+      - name: Restore backend dependencies
+        working-directory: KeyPay-Backend
+        run: dotnet restore KeyPay.sln
+
+      - name: Build backend (Release)
+        working-directory: KeyPay-Backend
+        run: dotnet build KeyPay.sln --configuration Release --no-restore
+
+      - name: Run backend tests
+        working-directory: KeyPay-Backend
+        run: dotnet test KeyPay.sln --configuration Release --no-build --verbosity normal
+
+      # ---------------------------
+      # Frontend (React) - Install/Build/Validate
+      # ---------------------------
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+          cache-dependency-path: 'KeyPay-Frontend/package-lock.json'
+
+      - name: Install frontend dependencies
+        working-directory: KeyPay-Frontend
+        run: npm install --no-audit --no-fund
+
+      - name: Build frontend
+        working-directory: KeyPay-Frontend
+        run: npm run build
+
+      - name: Validate frontend build output
+        working-directory: KeyPay-Frontend
+        run: |
+          if [ -d "build" ] || [ -d "dist" ]; then
+            echo "Build output detected."
+          else
+            echo "Error: Build output not found (expected build/ or dist/)." >&2
+            exit 1
+          fi
+
+
