@@ -92,3 +92,99 @@ jobs:
           aws lambda get-function-configuration --function-name "${{ matrix.function_name }}"
 
 
+  frontend:
+    name: Build and deploy frontend
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+      AWS_ACCOUNT_ID: "244706281753"
+      S3_BUCKET: ${{ vars.FRONTEND_S3_BUCKET_DEV }}
+      CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID_DEV }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+          cache-dependency-path: "KeyPay-Frontend/package-lock.json"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: KeyPay-Frontend
+
+      - name: Build React app
+        run: npm run build
+        working-directory: KeyPay-Frontend
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-oidc-keypay-dev
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to S3 (static assets and index.html)
+        run: |
+          set -euo pipefail
+
+          if [ -z "${S3_BUCKET:-}" ]; then
+            echo "S3_BUCKET is not set (expected in repository variables as FRONTEND_S3_BUCKET_DEV)"
+            exit 1
+          fi
+
+          BUILD_DIR="KeyPay-Frontend/build"
+          if [ ! -d "$BUILD_DIR" ]; then
+            echo "Build directory not found at $BUILD_DIR"
+            exit 1
+          fi
+
+          # Sync all files except index.html with long cache headers
+          aws s3 sync "$BUILD_DIR" "s3://$S3_BUCKET" \
+            --delete \
+            --exclude "index.html" \
+            --cache-control "public, max-age=31536000, immutable"
+
+          # Upload index.html with no-cache to ensure users get latest shell
+          aws s3 cp "$BUILD_DIR/index.html" "s3://$S3_BUCKET/index.html" \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --content-type "text/html"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CLOUDFRONT_DISTRIBUTION_ID:-}" ]; then
+            echo "CLOUDFRONT_DISTRIBUTION_ID is not set (expected in repository variables as CLOUDFRONT_DISTRIBUTION_ID_DEV)"
+            exit 1
+          fi
+
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+            --paths "/*" \
+            --query 'Invalidation.Id' \
+            --output text)
+
+          echo "Created invalidation: $INVALIDATION_ID"
+
+          # Wait up to ~5 minutes for completion (fast in most cases)
+          for i in $(seq 1 30); do
+            STATUS=$(aws cloudfront get-invalidation \
+              --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+              --id "$INVALIDATION_ID" \
+              --query 'Invalidation.Status' \
+              --output text)
+            echo "Invalidation status: $STATUS"
+            if [ "$STATUS" = "Completed" ]; then
+              echo "Invalidation completed."
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "Invalidation did not complete within time limit."
+          exit 1
+        shell: bash
