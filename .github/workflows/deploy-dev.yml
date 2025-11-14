@@ -136,7 +136,7 @@ jobs:
             exit 1
           fi
 
-          BUILD_DIR="KeyPay-Frontend/build"
+          BUILD_DIR="KeyPay-Frontend/dist"
           if [ ! -d "$BUILD_DIR" ]; then
             echo "Build directory not found at $BUILD_DIR"
             exit 1
