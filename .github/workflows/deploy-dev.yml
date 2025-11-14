@@ -1,0 +1,94 @@
+name: Deploy KeyPay Lambdas (dev)
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy (${{ matrix.function_name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - function_name: keypay-api-dev
+            project: KeyPay-Backend/src/KeyPay.Api/KeyPay.Api.csproj
+            publish_dir: KeyPay-Backend/publish/keypay-api-dev
+            zip_path: KeyPay-Backend/publish/keypay-api-dev.zip
+          - function_name: keypay-authorizer-dev
+            project: KeyPay-Backend/src/KeyPay.Authorizer/KeyPay.Authorizer.csproj
+            publish_dir: KeyPay-Backend/publish/keypay-authorizer-dev
+            zip_path: KeyPay-Backend/publish/keypay-authorizer-dev.zip
+          - function_name: keypay-webhook-dev
+            project: KeyPay-Backend/src/KeyPay.Webhook/KeyPay.Webhook.csproj
+            publish_dir: KeyPay-Backend/publish/keypay-webhook-dev
+            zip_path: KeyPay-Backend/publish/keypay-webhook-dev.zip
+
+    env:
+      AWS_REGION: us-east-1
+      AWS_ACCOUNT_ID: "244706281753"
+      DOTNET_NOLOGO: "true"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore KeyPay-Backend/KeyPay.sln
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-oidc-keypay-dev
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Publish (${{ matrix.function_name }})
+        run: |
+          dotnet publish "${{ matrix.project }}" \
+            -c Release \
+            -r linux-x64 \
+            --no-self-contained \
+            -o "${{ matrix.publish_dir }}"
+
+      - name: Package zip (${{ matrix.function_name }})
+        run: |
+          cd "${{ matrix.publish_dir }}"
+          zip -r "../${{ matrix.function_name }}.zip" .
+          cd - 1>/dev/null
+        shell: bash
+
+      - name: Update Lambda function code (${{ matrix.function_name }})
+        run: |
+          set -euo pipefail
+          aws lambda update-function-code \
+            --function-name "${{ matrix.function_name }}" \
+            --zip-file "fileb://${{ matrix.zip_path }}"
+          # Wait until the update is reflected as Active
+          aws lambda wait function-updated --function-name "${{ matrix.function_name }}"
+          aws lambda get-function-configuration --function-name "${{ matrix.function_name }}"
+
+
