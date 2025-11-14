@@ -11,11 +11,15 @@
     <PackageReference Include="xunit" Version="2.*" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
     <PackageReference Include="FluentAssertions" Version="6.*" />
+    <PackageReference Include="Moq" Version="4.*" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\KeyPay.Domain\KeyPay.Domain.csproj" />
     <ProjectReference Include="..\..\src\KeyPay.Application\KeyPay.Application.csproj" />
     <ProjectReference Include="..\..\src\KeyPay.Infrastructure\KeyPay.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\KeyPay.Api\KeyPay.Api.csproj" />
+    <ProjectReference Include="..\..\src\KeyPay.Authorizer\KeyPay.Authorizer.csproj" />
+    <ProjectReference Include="..\..\src\KeyPay.Webhook\KeyPay.Webhook.csproj" />
   </ItemGroup>
 </Project>
 
