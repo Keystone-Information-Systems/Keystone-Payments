@@ -48,7 +48,9 @@ export default function NewPaymentPage() {
         } else {
           // Initialize clientKey from store if present; otherwise wait for server data
           const stored = getStoredClientKey();
-          setClientKey(stored || undefined);
+          if (stored) {
+            setClientKey(stored);
+          }
         }
       } catch (e) {
         console.error('Auth code exchange failed', e);
@@ -91,6 +93,11 @@ export default function NewPaymentPage() {
         <button className="btn-primary" onClick={() => navigate('/')}>Back</button>
       </div>
     );
+  }
+
+  // Wait until a valid clientKey is available before rendering Drop-in
+  if (!clientKey) {
+    return <LoadingSpinner size="lg" message="Preparing secure payment session..." />;
   }
 
   const { paymentMethods, reference, amount, countryCode, lineItems = [], username, email, transactionId, surcharge } = data;
