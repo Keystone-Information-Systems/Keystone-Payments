@@ -18,11 +18,6 @@ if [ -z "$VITE_API_BASE_URL" ]; then
     exit 1
 fi
 
-if [ -z "$VITE_ADYEN_CLIENT_KEY" ]; then
-    echo "❌ Error: VITE_ADYEN_CLIENT_KEY environment variable is required"
-    exit 1
-fi
-
 # Install dependencies
 echo "📦 Installing dependencies..."
 npm ci

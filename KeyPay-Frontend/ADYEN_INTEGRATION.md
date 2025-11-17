@@ -28,8 +28,7 @@ This frontend now uses the official Adyen Web SDK for secure payment processing.
 ## Environment Variables
 
 ```bash
-# Required for Adyen Web SDK
-VITE_ADYEN_CLIENT_KEY=test_QCJ4F4V6K2VXZJ2G
+# Adyen Web SDK environment
 VITE_ADYEN_ENVIRONMENT=test
 ```
 
@@ -58,9 +57,8 @@ Use any of these test card numbers (no need to select them):
 
 ## Production Setup
 
-1. Get production Adyen client key
-2. Change `VITE_ADYEN_ENVIRONMENT=live`
-3. Update `VITE_ADYEN_CLIENT_KEY` to production key
-4. Remove test card references from UI
+1. Change `VITE_ADYEN_ENVIRONMENT=live`
+2. Ensure backend provides the correct tenant client key via token exchange
+3. Remove test card references from UI
 
 The integration is now production-ready and follows Adyen's best practices!

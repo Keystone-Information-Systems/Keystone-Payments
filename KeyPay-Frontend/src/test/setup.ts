@@ -5,7 +5,6 @@ import { vi } from 'vitest';
 Object.defineProperty(import.meta, 'env', {
   value: {
     VITE_API_BASE_URL: 'https://test-api.example.com',
-    VITE_ADYEN_CLIENT_KEY: 'test-client-key',
     VITE_ENVIRONMENT: 'test',
     VITE_APP_NAME: 'ValPay',
     VITE_APP_VERSION: '1.0.0',

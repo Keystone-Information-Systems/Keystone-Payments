@@ -18,11 +18,6 @@ if (-not $env:VITE_API_BASE_URL) {
     exit 1
 }
 
-if (-not $env:VITE_ADYEN_CLIENT_KEY) {
-    Write-Host "❌ Error: VITE_ADYEN_CLIENT_KEY environment variable is required" -ForegroundColor Red
-    exit 1
-}
-
 # Install dependencies
 Write-Host "📦 Installing dependencies..." -ForegroundColor Blue
 npm ci

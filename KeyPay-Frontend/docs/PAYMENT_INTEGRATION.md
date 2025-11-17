@@ -10,7 +10,6 @@ Create a `.env` file with the following variables:
 
 ```env
 VITE_API_BASE_URL=https://your-api-gateway-url
-VITE_ADYEN_CLIENT_KEY=your-adyen-client-key
 VITE_ENVIRONMENT=test
 VITE_APP_NAME=ValPay
 VITE_APP_VERSION=1.0.0

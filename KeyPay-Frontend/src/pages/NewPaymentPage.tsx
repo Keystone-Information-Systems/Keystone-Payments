@@ -10,6 +10,7 @@ import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { exchangeAuthCode } from '@/services/authService';
 import { getAuthToken, setAuthToken } from '@/stores/auth';
+import { getClientKey as getStoredClientKey, setClientKey as saveClientKey } from '@/stores/clientKey';
 
 export default function NewPaymentPage() {
   const [sp] = useSearchParams();
@@ -39,13 +40,15 @@ export default function NewPaymentPage() {
           const { token, adyenClientKey } = await exchangeAuthCode(code);
           setAuthToken(token);
           setClientKey(adyenClientKey);
+          saveClientKey(adyenClientKey || null);
           // Clean URL: remove code param
           const url = new URL(window.location.href);
           url.searchParams.delete('code');
           window.history.replaceState({}, '', url.toString());
         } else {
-          // Initialize clientKey if backend provided it earlier via build-time env; otherwise wait for server data
-          setClientKey(undefined);
+          // Initialize clientKey from store if present; otherwise wait for server data
+          const stored = getStoredClientKey();
+          setClientKey(stored || undefined);
         }
       } catch (e) {
         console.error('Auth code exchange failed', e);
@@ -60,13 +63,6 @@ export default function NewPaymentPage() {
     queryFn: () => getPaymentMethods({ orderId: orderId! }),
     enabled: !!orderId && !!getAuthToken() && ready
   });
-
-  // Set client key from backend (retry path) when available
-  useEffect(() => {
-    if (data?.adyenClientKey) {
-      setClientKey(data.adyenClientKey);
-    }
-  }, [data?.adyenClientKey]);
 
   // Sync holder name from server once data loads (handle null/undefined)
   useEffect(() => {

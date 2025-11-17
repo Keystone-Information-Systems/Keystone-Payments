@@ -71,7 +71,6 @@ cp env.example .env
 4. Configure environment variables:
 ```env
 VITE_API_BASE_URL=https://your-api-gateway-url
-VITE_ADYEN_CLIENT_KEY=your-adyen-client-key
 VITE_ENVIRONMENT=test
 VITE_APP_NAME=ValPay
 VITE_APP_VERSION=1.0.0
@@ -148,8 +147,9 @@ npm run invalidate
 Set the following environment variables in your deployment:
 
 - `VITE_API_BASE_URL`: Your API Gateway URL
-- `VITE_ADYEN_CLIENT_KEY`: Your Adyen client key
 - `VITE_ENVIRONMENT`: `test` or `live`
+
+Note: The Adyen client key is provided per tenant by the backend after token exchange. No frontend fallback is used.
 
 ## Security
 

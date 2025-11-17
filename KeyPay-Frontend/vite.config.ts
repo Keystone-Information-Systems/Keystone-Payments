@@ -27,11 +27,9 @@ export default defineConfig({
   define: {
     // Use relative API base so ngrok + Vite proxy work on Free
     'process.env.VITE_API_BASE_URL': JSON.stringify('https://t90bvzrzc3.execute-api.us-east-1.amazonaws.com/dev/api'),
-    'process.env.VITE_ADYEN_CLIENT_KEY': JSON.stringify('test_DVRLC56S3RCH5JWVCEBDLLJYEMGXT57T'),
     'process.env.VITE_ENVIRONMENT': JSON.stringify('test'),
     // Original environment variable code (commented):
     // 'process.env.VITE_API_BASE_URL': JSON.stringify(process.env.VITE_API_BASE_URL || 'http://localhost:5000'),
-    // 'process.env.VITE_ADYEN_CLIENT_KEY': JSON.stringify(process.env.VITE_ADYEN_CLIENT_KEY || 'test_KPIEBM4JNFADJMJYJWUOV4ZHP457XA3T'),
     // 'process.env.VITE_ENVIRONMENT': JSON.stringify(process.env.VITE_ENVIRONMENT || 'test'),
   },
   server: {
