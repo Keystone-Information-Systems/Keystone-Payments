@@ -120,7 +120,8 @@ jobs:
       - name: Build React app
         run: npm run build
         working-directory: KeyPay-Frontend
-
+        env:
+          VITE_API_BASE: ${{ vars.VITE_API_BASE_URL_DEV }}
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
