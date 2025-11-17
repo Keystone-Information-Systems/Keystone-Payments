@@ -377,7 +377,7 @@ static Guid? GetTenantIdFromJwt(HttpContext ctx)
 }
 
 // New endpoint: Retrieve previously stored payment methods data by orderId
-app.MapPost("/api/getpaymentMethods", async (Db db, HttpContext ctx, CancellationToken ct) =>
+app.MapPost("/api/getpaymentMethods", async (Db db, HttpContext ctx, ISecretsManager secrets, CancellationToken ct) =>
 {
     try
     {
@@ -395,17 +395,16 @@ app.MapPost("/api/getpaymentMethods", async (Db db, HttpContext ctx, Cancellatio
         }
         var orderId = orderIdEl.GetString();
 
-        // Tenant guard: ensure order belongs to JWT tenant
-        // var jwtTid = GetTenantIdFromJwt(ctx);
-        // if (jwtTid is null) return Results.StatusCode(403);
-        // using (var c = db.Open())
-        // {
-        //     var tid = await c.QuerySingleOrDefaultAsync<Guid?>("select tenantid from transactions where merchantreference=@ref limit 1", new { @ref = orderId });
-        //     if (tid is null || tid.Value == Guid.Empty || tid.Value != jwtTid.Value)
-        //     {
-        //         return Results.StatusCode(403);
-        //     }
-        // }
+        // Resolve tenantId for this order to fetch tenant-specific client key
+        Guid? tenantIdForOrder = null;
+        try
+        {
+            using var c = db.Open();
+            tenantIdForOrder = await c.QuerySingleOrDefaultAsync<Guid?>(
+                "select tenantid from transactions where merchantreference=@ref limit 1",
+                new { @ref = orderId });
+        }
+        catch { }
 
         var data = await db.GetPaymentDataByOrderIdAsync(orderId!, ct);
         if (data is null)
@@ -432,6 +431,31 @@ app.MapPost("/api/getpaymentMethods", async (Db db, HttpContext ctx, Cancellatio
             return Results.BadRequest(new { message = "Could not find countryCode for the provided orderId" });
         }
 
+        // Lookup tenant-specific Adyen client key via Secrets Manager (best-effort)
+        string adyenClientKey = string.Empty;
+        if (tenantIdForOrder is Guid tid && tid != Guid.Empty)
+        {
+            try
+            {
+                using var c3 = db.Open();
+                var tenantRow = await c3.QuerySingleOrDefaultAsync<(string? SecretName, string MerchantAccount)?>(
+                    "select secret_name as SecretName, merchantaccount as MerchantAccount from tenants where tenantid=@tid limit 1",
+                    new { tid });
+                if (tenantRow is not null)
+                {
+                    var effectiveSecretName = string.IsNullOrWhiteSpace(tenantRow.Value.SecretName)
+                        ? $"tenant-{tenantRow.Value.MerchantAccount}-config"
+                        : tenantRow.Value.SecretName;
+                    var secretJson = await secrets.GetSecretAsync(effectiveSecretName, ct);
+                    using var secretDoc = System.Text.Json.JsonDocument.Parse(secretJson);
+                    var root = secretDoc.RootElement;
+                    var ck = root.TryGetProperty("adyenClientKey", out var ckEl) ? ckEl.GetString() : null;
+                    if (!string.IsNullOrWhiteSpace(ck)) adyenClientKey = ck!;
+                }
+            }
+            catch { }
+        }
+
         if (data.PaymentMethods is null)
         {
             // If not in cache and not stored, return empty array to avoid blocking UX
@@ -451,7 +475,8 @@ app.MapPost("/api/getpaymentMethods", async (Db db, HttpContext ctx, Cancellatio
                 email = data.Email,
                 cardHolderName = data.CardHolderName,
                 surcharge = new { amount = data.SurchargeAmount ?? 0, percent = (int?)null },
-                legacyPostUrl = data.LegacyPostUrl ?? string.Empty
+                legacyPostUrl = data.LegacyPostUrl ?? string.Empty,
+                adyenClientKey
             };
             return Results.Ok(emptyResponse);
         }
@@ -474,7 +499,8 @@ app.MapPost("/api/getpaymentMethods", async (Db db, HttpContext ctx, Cancellatio
             email = data.Email,
             cardHolderName = data.CardHolderName,
             surcharge = new { amount = data.SurchargeAmount ?? 0, percent = (int?)null },
-            legacyPostUrl = data.LegacyPostUrl ?? string.Empty
+            legacyPostUrl = data.LegacyPostUrl ?? string.Empty,
+            adyenClientKey
         };
 
         return Results.Ok(response);

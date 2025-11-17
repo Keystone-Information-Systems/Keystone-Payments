@@ -11,6 +11,7 @@ export const schemas = {
     transactionId: z.string().optional(),
     amount: z.object({ value: z.number().int().positive(), currency: z.string().length(3) }),
     countryCode: z.string().length(2),
+    adyenClientKey: z.string().optional(),
     lineItems: z.array(
       z.object({
         accountNumber: z.string(),

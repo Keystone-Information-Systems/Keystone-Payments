@@ -61,6 +61,13 @@ export default function NewPaymentPage() {
     enabled: !!orderId && !!getAuthToken() && ready
   });
 
+  // Set client key from backend (retry path) when available
+  useEffect(() => {
+    if (data?.adyenClientKey) {
+      setClientKey(data.adyenClientKey);
+    }
+  }, [data?.adyenClientKey]);
+
   // Sync holder name from server once data loads (handle null/undefined)
   useEffect(() => {
     if (data?.cardHolderName != null) {

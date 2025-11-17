@@ -49,10 +49,13 @@ export default function AdyenDropin({
 
     (async () => {
       try {
+        if (!clientKey) {
+          throw new Error('Client key not available. Please refresh the page and try again.');
+        }
         const { paymentMethodsResponse: pm, reference: ref, amount: amt, countryCode: cc } = initialPropsRef.current;
         const checkout = await AdyenCheckout({
           environment: import.meta.env.VITE_ADYEN_ENVIRONMENT || 'test',
-          clientKey: (typeof clientKey === 'string' && clientKey) ? clientKey : import.meta.env.VITE_ADYEN_CLIENT_KEY,
+          clientKey: clientKey,
           paymentMethodsResponse: pm,
           // Provide amount so the Pay button shows the total
           amount: (getSubmitAmount?.() ?? amt),
