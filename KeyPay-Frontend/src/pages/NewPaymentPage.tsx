@@ -5,7 +5,7 @@ import { getPaymentMethods, cancelPayment } from '@/services/paymentService';
 import AdyenDropin from '@/components/payment/AdyenDropin';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { formatCurrency } from '@/utils/formatters';
-import { Box, Typography, List, ListItem, ListItemText, TextField, Divider, Alert, Paper, Button, Stack } from '@mui/material';
+import { Box, Typography, List, ListItem, ListItemText, TextField, Divider, Alert, Paper, Button, Stack, Backdrop, CircularProgress } from '@mui/material';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { exchangeAuthCode } from '@/services/authService';
@@ -25,6 +25,7 @@ export default function NewPaymentPage() {
   const [showNameWarning, setShowNameWarning] = useState<boolean>(false);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [processing, setProcessing] = useState<boolean>(false);
   // Surcharge-related state must be declared before any early returns to keep hook order stable
   const [surchargeMinor] = useState<number>(0);
   // estimation removed; do not use state
@@ -114,6 +115,12 @@ export default function NewPaymentPage() {
 
   return (
     <div className="max-w-2xl mx-auto p-6">
+      <Backdrop open={processing} sx={{ color: '#fff', zIndex: (theme) => theme.zIndex.modal + 1 }}>
+        <Stack alignItems="center" spacing={2}>
+          <CircularProgress color="inherit" />
+          <Typography variant="body1">Processing payment… Please don’t close this window.</Typography>
+        </Stack>
+      </Backdrop>
       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
         <Typography variant="h5">Checkout</Typography>
         <Button
@@ -207,6 +214,17 @@ export default function NewPaymentPage() {
               secondaryAction={
                 <Box sx={{ minWidth: 140, textAlign: 'right' }}>
                   <Typography variant="body2">
+                    {formatCurrency(baseTotalMinor, amount.currency)}
+                  </Typography>
+                </Box>
+              }
+            >
+              <ListItemText primary="Invoice total" />
+            </ListItem>
+            <ListItem
+              secondaryAction={
+                <Box sx={{ minWidth: 140, textAlign: 'right' }}>
+                  <Typography variant="body2">
                     {formatCurrency(initialSurchargeMinor, amount.currency)}
                   </Typography>
                 </Box>
@@ -251,6 +269,7 @@ export default function NewPaymentPage() {
         clientKey={clientKey}
         cardHolderName={holderName || undefined}
         onRequireHolderName={() => setShowNameWarning(true)}
+        onProcessingChange={setProcessing}
         onFinalResult={(r) => {
             const rc = (r.resultCode || '').toLowerCase();
             if (r.provisional) {

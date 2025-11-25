@@ -17,6 +17,7 @@ type Props = {
   onRequireHolderName?: () => void;
   onFinalResult: (r: { resultCode?: string; pspReference?: string; txId?: string; provisional?: boolean; statusCheckUrl?: string; paymentMethodType?: string; paymentMethodBrand?: string; cardHolderName?: string }) => void;
   onError: (e: any) => void;
+  onProcessingChange?: (processing: boolean) => void;
 };
 
 export default function AdyenDropin({
@@ -30,7 +31,8 @@ export default function AdyenDropin({
   cardHolderName,
   onRequireHolderName,
   onFinalResult,
-  onError
+  onError,
+  onProcessingChange
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const dropinRef = useRef<any>(null);
@@ -78,6 +80,7 @@ export default function AdyenDropin({
                 try { dropinInstance?.setStatus?.('ready'); } catch {}
                 return;
               }
+              try { onProcessingChange?.(true); } catch {}
               let submitAmount = getSubmitAmount?.() ?? amt;
               const res = await createPayment({
                 reference: ref,
@@ -90,6 +93,7 @@ export default function AdyenDropin({
 
               if (res.action) {
                 dropinInstance?.handleAction(res.action); // 3DS/redirect
+                try { onProcessingChange?.(false); } catch {}
               } else {
                 onFinalResult({
                   resultCode: res.resultCode,
@@ -106,9 +110,11 @@ export default function AdyenDropin({
                   const ev = new CustomEvent('valpay:submitAmountUsed', { detail: { value: submitAmount.value, currency: submitAmount.currency } });
                   window.dispatchEvent(ev);
                 } catch {}
+                try { onProcessingChange?.(false); } catch {}
               }
             } catch (e) {
               onError(e);
+              try { onProcessingChange?.(false); } catch {}
             }
           },
           onAdditionalDetails: async (state, dropinInstance) => {
