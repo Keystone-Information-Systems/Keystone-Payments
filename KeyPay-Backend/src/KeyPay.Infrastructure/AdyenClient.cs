@@ -11,6 +11,7 @@ namespace KeyPay.Infrastructure;
 public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<AdyenClient> logger, IHttpContextAccessor httpContextAccessor) : IAdyenClient
 {
     private readonly string _merchantAccount = cfg["Adyen:MerchantAccount"] ?? "";
+    private readonly string _houseBalanceAccountId = cfg["Adyen:HouseBalanceAccountId"] ?? "";
     private readonly string _apiVersion = cfg["Adyen:ApiVersion"] ?? "v71";
     private readonly string _binLookupVersion = cfg["Adyen:BinLookupVersion"] ?? "v54";
     private readonly string _palBaseUrl = cfg["Adyen:PalBaseUrl"] ?? "https://pal-test.adyen.com";
@@ -129,7 +130,7 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
         }
     }
 
-    public async Task<CreatePaymentResponse> CreatePaymentAsync(CreatePaymentRequest req, string idempotencyKey, CancellationToken ct)
+    public async Task<CreatePaymentResponse> CreatePaymentAsync(CreatePaymentRequest req, long baseAmount, long surcharge, string idempotencyKey, CancellationToken ct)
     {
         try
         {
@@ -142,6 +143,15 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
             var current = _httpContextAccessor.HttpContext;
             var merchant = current?.Items["MerchantAccount"] as string ?? _merchantAccount;
             var adyenApiKey = current?.Items["AdyenApiKey"] as string;
+            var municipalityBalanceAccountId = current?.Items["MunicipalityBalanceAccountId"] as string ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(municipalityBalanceAccountId))
+            {
+                _logger.LogWarning("Municipality balance account id missing for {Reference}", req.Reference);
+            }
+            if (string.IsNullOrWhiteSpace(_houseBalanceAccountId))
+            {
+                _logger.LogWarning("House balance account id not configured for {Reference}", req.Reference);
+            }
 
             var payload = new
             {
@@ -149,6 +159,23 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
                 amount = new { value = req.AmountMinor, currency = req.Currency },
                 reference = req.Reference,
                 returnUrl = req.ReturnUrl,
+                splits = new object[]
+                {
+                    new
+                    {
+                        amount = new { value = baseAmount, currency = req.Currency },
+                        type = "BalanceAccount",
+                        account = municipalityBalanceAccountId,
+                        reference = $"{req.Reference}-MUNICIPALITY"
+                    },
+                    new
+                    {
+                        amount = new { value = surcharge, currency = req.Currency },
+                        type = "BalanceAccount",
+                        account = _houseBalanceAccountId,
+                        reference = $"{req.Reference}-CONVENIENCE_FEE"
+                    }
+                },
                 channel = "Web",
                 shopperInteraction = "Ecommerce",
                 countryCode,

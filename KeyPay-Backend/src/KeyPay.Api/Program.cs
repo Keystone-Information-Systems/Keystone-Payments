@@ -215,10 +215,17 @@ app.Use(async (context, next) =>
                     using var doc = System.Text.Json.JsonDocument.Parse(secretJson);
                     var root = doc.RootElement;
                     string? adyenApiKey = root.TryGetProperty("adyenAPIKey", out var apiKeyEl) ? apiKeyEl.GetString() : null;
+                    string? municipalityBalanceAccountId = root.TryGetProperty("municipalityBalanceAccountId", out var municipalityEl)
+                        ? municipalityEl.GetString()
+                        : null;
                     if (!string.IsNullOrWhiteSpace(adyenApiKey))
                     {
                         context.Items["AdyenApiKey"] = adyenApiKey!;
                         context.Items["MerchantAccount"] = merchant!;
+                    }
+                    if (!string.IsNullOrWhiteSpace(municipalityBalanceAccountId))
+                    {
+                        context.Items["MunicipalityBalanceAccountId"] = municipalityBalanceAccountId!;
                     }
                 }
             }
@@ -571,12 +578,19 @@ app.MapPost("/api/paymentMethods", async (
         var secretRoot = secretDoc.RootElement;
         string? adyenApiKey = secretRoot.TryGetProperty("adyenAPIKey", out var apiKeyEl) ? apiKeyEl.GetString() : null;
         string? adyenClientKey = secretRoot.TryGetProperty("adyenClientKey", out var clientKeyEl) ? clientKeyEl.GetString() : null;
+        string? municipalityBalanceAccountId = secretRoot.TryGetProperty("municipalityBalanceAccountId", out var municipalityEl)
+            ? municipalityEl.GetString()
+            : null;
         logger.LogInformation("Tenant secret loaded: {SecretName}. AdyenApiKey set: {HasApiKey}, AdyenClientKey set: {HasClientKey}",
             effectiveSecretName,
             !string.IsNullOrWhiteSpace(adyenApiKey),
             !string.IsNullOrWhiteSpace(adyenClientKey));
         ctx.Items["AdyenApiKey"] = adyenApiKey ?? string.Empty;
         ctx.Items["MerchantAccount"] = req.MerchantAccount;
+        if (!string.IsNullOrWhiteSpace(municipalityBalanceAccountId))
+        {
+            ctx.Items["MunicipalityBalanceAccountId"] = municipalityBalanceAccountId!;
+        }
 
         logger.LogInformation("Step 2: Generating idempotency key. CorrelationId: {CorrelationId}", correlationId);
         // Check idempotency - use OrderId for unique key
@@ -829,7 +843,7 @@ app.MapPost("/api/payments", async (
 
         var adjustedReq = req with { AmountMinor = checked(baseAmount + surcharge) };
 
-        var res = await adyen.CreatePaymentAsync(adjustedReq, idempotencyKey, ct);
+        var res = await adyen.CreatePaymentAsync(adjustedReq,baseAmount, surcharge, idempotencyKey, ct);
 
         // Update cardholder name (if provided) at payment creation stage only
         if (!string.IsNullOrWhiteSpace(req.CardHolderName))
