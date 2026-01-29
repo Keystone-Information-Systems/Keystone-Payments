@@ -24,6 +24,11 @@ public class PaymentMethodsRequestValidator : AbstractValidator<PaymentMethodsRe
         RuleFor(x => x.MerchantAccount)
             .NotEmpty()
             .WithMessage("Merchant account is required");
+
+        RuleFor(x => x.MinSurchargeFee)
+            .GreaterThanOrEqualTo(0)
+            .WithMessage("minSurchargeFee must be >= 0")
+            .When(x => x.MinSurchargeFee.HasValue);
     }
 }
 

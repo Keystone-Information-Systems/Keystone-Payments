@@ -606,6 +606,10 @@ app.MapPost("/api/paymentMethods", async (
         {
             return Results.BadRequest(new { error = "surchargePercent must be between 0 and 100", field = "surchargePercent" });
         }
+        if (req.MinSurchargeFee is not null && req.MinSurchargeFee < 0)
+        {
+            return Results.BadRequest(new { error = "minSurchargeFee must be >= 0", field = "minSurchargeFee" });
+        }
 
         logger.LogInformation("Step 1: Resolving tenant. CorrelationId: {CorrelationId}", correlationId);
         var tenantInfo = await db.GetTenantInfoByMerchantAccountAsync(req.MerchantAccount, ct);
@@ -677,6 +681,11 @@ app.MapPost("/api/paymentMethods", async (
         // Compute surcharge amount using provided percent and persist amount only
         var surchargeAmount = (long)Math.Round(amountMinor * (req.SurchargePercent!.Value / 100.0));
         if (surchargeAmount < 0) surchargeAmount = 0;
+        var minSurchargeFee = req.MinSurchargeFee ?? 0;
+        if (surchargeAmount < minSurchargeFee)
+        {
+            surchargeAmount = minSurchargeFee;
+        }
         await db.UpdateSurchargeAsync(TxId, surchargeAmount, ct);
 
         // Log transaction creation operation
