@@ -17,10 +17,10 @@ public record PaymentMethodsRequest(
     [property: JsonPropertyName("orderId")] string OrderId,
     // Legacy redirect POST target for final handoff (single URL for all outcomes)
     [property: JsonPropertyName("legacyPostUrl")] string? LegacyPostUrl = null,
-    // Percentage for surcharge provided by legacy system (0-100). Used to compute surcharge amount immediately.
-    [property: JsonPropertyName("surchargePercent")] int? SurchargePercent = null,
-    // Minimum surcharge fee (minor units). Applied if computed surcharge is lower.
-    [property: JsonPropertyName("minSurchargeFee")] long? MinSurchargeFee = null,
+    // Percentage for surcharge provided by legacy system (0-100, decimals allowed).
+    [property: JsonPropertyName("surchargePercent")] decimal? SurchargePercent = null,
+    // Minimum surcharge fee (major units, decimals allowed, e.g., 1.50 dollars).
+    [property: JsonPropertyName("minSurchargeFee")] decimal? MinSurchargeFee = null,
     [property: JsonPropertyName("username")] string? Username = null,
     [property: JsonPropertyName("email")] string? Email = null,
     [property: JsonPropertyName("cardHolderName")] string? CardHolderName = null,

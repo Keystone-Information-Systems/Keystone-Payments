@@ -679,12 +679,14 @@ app.MapPost("/api/paymentMethods", async (
         await db.CreatePendingAsync(TxId, tenantId, req.OrderId, amountMinor, currency, idempotencyKey, req.Username, req.Email, ct);
 
         // Compute surcharge amount using provided percent and persist amount only
-        var surchargeAmount = (long)Math.Round(amountMinor * (req.SurchargePercent!.Value / 100.0));
+        var surchargeAmount = (long)Math.Round(amountMinor * ((double)req.SurchargePercent!.Value / 100.0));
         if (surchargeAmount < 0) surchargeAmount = 0;
-        var minSurchargeFee = req.MinSurchargeFee ?? 0;
-        if (surchargeAmount < minSurchargeFee)
+        var minSurchargeFeeMinor = req.MinSurchargeFee is null
+            ? 0
+            : (long)Math.Round((double)req.MinSurchargeFee.Value * 100.0, MidpointRounding.AwayFromZero);
+        if (surchargeAmount < minSurchargeFeeMinor)
         {
-            surchargeAmount = minSurchargeFee;
+            surchargeAmount = minSurchargeFeeMinor;
         }
         await db.UpdateSurchargeAsync(TxId, surchargeAmount, ct);
 
