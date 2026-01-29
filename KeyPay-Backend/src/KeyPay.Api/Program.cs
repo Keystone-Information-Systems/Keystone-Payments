@@ -167,6 +167,7 @@ try
 {
     var dbForIndex = app.Services.GetRequiredService<Db>();
     dbForIndex.EnsureIndexesAsync(default).GetAwaiter().GetResult();
+    dbForIndex.EnsureTransactionColumnsAsync(default).GetAwaiter().GetResult();
 }
 catch { }
 
@@ -381,6 +382,58 @@ static Guid? GetTenantIdFromJwt(HttpContext ctx)
         return string.IsNullOrWhiteSpace(t) ? (Guid?)null : Guid.Parse(t);
     }
     catch { return null; }
+}
+
+// Map AVS-related refusals to a stable error code for UI handling
+// NOTE: AVS mismatch blocking is currently disabled. Re-enable by
+// uncommenting the logic below and the call site above.
+static string? MapRefusalReason(string? rawPayload)
+{
+    /*
+    if (string.IsNullOrWhiteSpace(rawPayload)) return null;
+    try
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(rawPayload);
+        var root = doc.RootElement;
+
+        string? refusalReason = root.TryGetProperty("refusalReason", out var rr) ? rr.GetString() : null;
+        string? refusalReasonCode = root.TryGetProperty("refusalReasonCode", out var rrc) ? rrc.GetString() : null;
+
+        string? avs = null;
+        if (root.TryGetProperty("additionalData", out var additionalData) &&
+            additionalData.ValueKind == System.Text.Json.JsonValueKind.Object)
+        {
+            if (additionalData.TryGetProperty("avsResult", out var avsResult)) avs = avsResult.GetString();
+            else if (additionalData.TryGetProperty("avsResultRaw", out var avsRaw)) avs = avsRaw.GetString();
+            else if (additionalData.TryGetProperty("avsResultCode", out var avsCode)) avs = avsCode.GetString();
+        }
+
+        bool isAvsMismatch = false;
+        if (!string.IsNullOrWhiteSpace(refusalReason))
+        {
+            var rrLower = refusalReason.ToLowerInvariant();
+            isAvsMismatch = rrLower.Contains("avs") || rrLower.Contains("address") || rrLower.Contains("postal") || rrLower.Contains("zip");
+        }
+        if (!isAvsMismatch && !string.IsNullOrWhiteSpace(refusalReasonCode))
+        {
+            var rcLower = refusalReasonCode.ToLowerInvariant();
+            isAvsMismatch = rcLower.Contains("avs") || rcLower.Contains("address") || rcLower.Contains("postal") || rcLower.Contains("zip");
+        }
+        if (!isAvsMismatch && !string.IsNullOrWhiteSpace(avs))
+        {
+            var avsLower = avs.ToLowerInvariant();
+            isAvsMismatch = avsLower == "n" || avsLower.Contains("no match") || avsLower.Contains("mismatch") || avsLower.Contains("fail");
+        }
+
+        return isAvsMismatch ? "ADDRESS_MISMATCH" : refusalReason;
+    }
+    catch
+    {
+        return null;
+    }
+    */
+
+    return null;
 }
 
 // New endpoint: Retrieve previously stored payment methods data by orderId
@@ -844,12 +897,34 @@ app.MapPost("/api/payments", async (
         var adjustedReq = req with { AmountMinor = checked(baseAmount + surcharge) };
 
         var res = await adyen.CreatePaymentAsync(adjustedReq,baseAmount, surcharge, idempotencyKey, ct);
+        // AVS mismatch blocking disabled for now
+        // var mappedRefusalReason = MapRefusalReason(res.Raw as string);
+        var mappedRefusalReason = MapRefusalReason(null);
 
         // Update cardholder name (if provided) at payment creation stage only
         if (!string.IsNullOrWhiteSpace(req.CardHolderName))
         {
             await db.UpdateCardHolderNameAsync(txId, req.CardHolderName, ct);
         }
+        var billingStreet = string.IsNullOrWhiteSpace(req.BillingAddress?.Street) ? null : req.BillingAddress?.Street;
+        var billingHouseNumberOrName = string.IsNullOrWhiteSpace(req.BillingAddress?.HouseNumberOrName) ? null : req.BillingAddress?.HouseNumberOrName;
+        var billingCity = string.IsNullOrWhiteSpace(req.BillingAddress?.City) ? null : req.BillingAddress?.City;
+        var billingStateOrProvince = string.IsNullOrWhiteSpace(req.BillingAddress?.StateOrProvince) ? null : req.BillingAddress?.StateOrProvince;
+        var billingPostalCode = string.IsNullOrWhiteSpace(req.BillingAddress?.PostalCode) ? null : req.BillingAddress?.PostalCode;
+        var billingCountry = string.IsNullOrWhiteSpace(req.BillingAddress?.Country) ? null : req.BillingAddress?.Country;
+        var phoneNumber = string.IsNullOrWhiteSpace(req.PhoneNumber) ? null : req.PhoneNumber;
+        var email = string.IsNullOrWhiteSpace(req.Email) ? null : req.Email;
+        await db.UpdateBillingDetailsAsync(
+            txId,
+            billingStreet,
+            billingHouseNumberOrName,
+            billingCity,
+            billingStateOrProvince,
+            billingPostalCode,
+            billingCountry,
+            phoneNumber,
+            email,
+            ct);
         var finalStatus = res.ResultCode.Equals("Authorised", StringComparison.OrdinalIgnoreCase) ? "Authorised" : "Refused";
 
         // Update status and automatically log operation
@@ -858,7 +933,7 @@ app.MapPost("/api/payments", async (
             finalStatus,
             res.PspReference,
             res.ResultCode,
-            null,
+            mappedRefusalReason,
             tenantId,
             "PAYMENT_PROCESSED",
             adjustedReq.AmountMinor,
@@ -873,7 +948,7 @@ app.MapPost("/api/payments", async (
 
         object response = res.Action is not null
             ? new { txId, action = res.Action, statusCheckUrl }
-            : new { txId, resultCode = res.ResultCode, pspReference = res.PspReference, provisional, statusCheckUrl };
+            : new { txId, resultCode = res.ResultCode, pspReference = res.PspReference, refusalReason = mappedRefusalReason, provisional, statusCheckUrl };
 
         // Cache response
         await idempotency.StoreKeyAsync(idempotencyKey, System.Text.Json.JsonSerializer.Serialize(response), ct);
@@ -1011,7 +1086,16 @@ app.MapGet("/api/transactions/{id:guid}", async (Guid id, Db db, ILogger<Program
     try
     {
         using var c = db.Open();
-        var row = await c.QuerySingleOrDefaultAsync<dynamic>("select transactionId, tenantId, merchantReference, amountValue, currencyCode, status::text as status, pspReference, resultCode, refusalReason, idempotencyKey, createdAt, updatedAt, username, email, cardholdername from transactions where transactionId=@id", new { id });
+        var row = await c.QuerySingleOrDefaultAsync<dynamic>(
+            """
+            select transactionId, tenantId, merchantReference, amountValue, currencyCode, status::text as status,
+                   pspReference, resultCode, refusalReason, idempotencyKey, createdAt, updatedAt, username, email,
+                   cardholdername, billingstreet, billinghousenumberorname, billingcity, billingstateorprovince,
+                   billingpostalcode, billingcountry, phonenumber
+            from transactions
+            where transactionId=@id
+            """,
+            new { id });
 
         if (row is null)
         {
@@ -1052,6 +1136,13 @@ app.MapGet("/api/transactions/{id:guid}", async (Guid id, Db db, ILogger<Program
             row.username,
             row.email,
             row.cardholdername,
+            row.billingstreet,
+            row.billinghousenumberorname,
+            row.billingcity,
+            row.billingstateorprovince,
+            row.billingpostalcode,
+            row.billingcountry,
+            row.phonenumber,
             lineItems = items.Select(li => new { accountNumber = li.AccountNumber, billNumber = li.BillNumber, description = li.Description, amountValue = li.AmountValue })
         });
     }

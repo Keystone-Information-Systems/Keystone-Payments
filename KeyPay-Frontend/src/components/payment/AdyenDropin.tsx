@@ -14,6 +14,16 @@ type Props = {
   transactionId?: string;
   clientKey?: string;
   cardHolderName?: string;
+  billingAddress?: {
+    street?: string;
+    houseNumberOrName?: string;
+    city?: string;
+    stateOrProvince?: string;
+    postalCode?: string;
+    country?: string;
+  };
+  phoneNumber?: string;
+  email?: string;
   onRequireHolderName?: () => void;
   onFinalResult: (r: { resultCode?: string; pspReference?: string; txId?: string; provisional?: boolean; statusCheckUrl?: string; paymentMethodType?: string; paymentMethodBrand?: string; cardHolderName?: string }) => void;
   onError: (e: any) => void;
@@ -29,6 +39,9 @@ export default function AdyenDropin({
   transactionId,
   clientKey,
   cardHolderName,
+  billingAddress,
+  phoneNumber,
+  email,
   onRequireHolderName,
   onFinalResult,
   onError,
@@ -37,6 +50,9 @@ export default function AdyenDropin({
   const containerRef = useRef<HTMLDivElement>(null);
   const dropinRef = useRef<any>(null);
   const holderNameRef = useRef<string | undefined>(cardHolderName);
+  const billingAddressRef = useRef<Props['billingAddress']>(billingAddress);
+  const phoneNumberRef = useRef<string | undefined>(phoneNumber);
+  const emailRef = useRef<string | undefined>(email);
   const initialPropsRef = useRef({ paymentMethodsResponse, reference, amount, countryCode, transactionId });
   const selectedPaymentMethodTypeRef = useRef<string | undefined>(undefined);
   const selectedPaymentMethodBrandRef = useRef<string | undefined>(undefined);
@@ -45,6 +61,18 @@ export default function AdyenDropin({
   useEffect(() => {
     holderNameRef.current = cardHolderName;
   }, [cardHolderName]);
+
+  useEffect(() => {
+    billingAddressRef.current = billingAddress;
+  }, [billingAddress]);
+
+  useEffect(() => {
+    phoneNumberRef.current = phoneNumber;
+  }, [phoneNumber]);
+
+  useEffect(() => {
+    emailRef.current = email;
+  }, [email]);
 
   useEffect(() => {
     let dropin: any;
@@ -88,7 +116,10 @@ export default function AdyenDropin({
                 countryCode: cc,
                 returnUrl: `${window.location.origin}/payment/result`,
                 paymentMethod: state.data.paymentMethod,
-                cardHolderName: holderNameRef.current
+                cardHolderName: holderNameRef.current,
+                billingAddress: billingAddressRef.current,
+                phoneNumber: phoneNumberRef.current,
+                email: emailRef.current
               });
 
               if (res.action) {

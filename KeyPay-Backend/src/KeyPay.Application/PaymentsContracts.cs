@@ -33,7 +33,18 @@ public record CreatePaymentRequest(
     object PaymentMethod, // Adyen encrypted blob
     string? Country = null,
     string? Origin = null,
-    [property: JsonPropertyName("cardHolderName")] string? CardHolderName = null);
+    [property: JsonPropertyName("cardHolderName")] string? CardHolderName = null,
+    [property: JsonPropertyName("billingAddress")] BillingAddress? BillingAddress = null,
+    [property: JsonPropertyName("phoneNumber")] string? PhoneNumber = null,
+    [property: JsonPropertyName("email")] string? Email = null);
+
+public record BillingAddress(
+    [property: JsonPropertyName("street")] string? Street = null,
+    [property: JsonPropertyName("houseNumberOrName")] string? HouseNumberOrName = null,
+    [property: JsonPropertyName("city")] string? City = null,
+    [property: JsonPropertyName("stateOrProvince")] string? StateOrProvince = null,
+    [property: JsonPropertyName("postalCode")] string? PostalCode = null,
+    [property: JsonPropertyName("country")] string? Country = null);
 
 public record CreatePaymentResponse(string ResultCode, string? PspReference, object? Action, object Raw);
 

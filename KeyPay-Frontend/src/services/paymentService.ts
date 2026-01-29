@@ -69,6 +69,16 @@ export async function createPayment(args: {
   returnUrl: string;
   paymentMethod: any;
   cardHolderName?: string;
+  billingAddress?: {
+    street?: string;
+    houseNumberOrName?: string;
+    city?: string;
+    stateOrProvince?: string;
+    postalCode?: string;
+    country?: string;
+  };
+  phoneNumber?: string;
+  email?: string;
 }) {
   const res = await fetch(`${API_BASE}/payments`, {
     method: 'POST',
@@ -80,7 +90,10 @@ export async function createPayment(args: {
       country: args.countryCode,
       returnUrl: args.returnUrl,
       paymentMethod: args.paymentMethod,
-      cardHolderName: args.cardHolderName
+      cardHolderName: args.cardHolderName,
+      billingAddress: args.billingAddress,
+      phoneNumber: args.phoneNumber,
+      email: args.email
     })
   });
   if (!res.ok) throw new Error(`payments ${res.status}`);

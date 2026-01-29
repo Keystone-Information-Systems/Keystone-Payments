@@ -120,6 +120,26 @@ public sealed class Db(string connStr)
         });
     }
 
+    public async Task EnsureTransactionColumnsAsync(CancellationToken ct)
+    {
+        await ExecuteWithRetryAsync(async () =>
+        {
+            using var c = Open();
+            await c.ExecuteAsync(
+                """
+                alter table transactions
+                    add column if not exists billingstreet text,
+                    add column if not exists billinghousenumberorname text,
+                    add column if not exists billingcity text,
+                    add column if not exists billingstateorprovince text,
+                    add column if not exists billingpostalcode text,
+                    add column if not exists billingcountry text,
+                    add column if not exists phonenumber text;
+                """
+            );
+        });
+    }
+
     public async Task CreateAuthCodeAsync(string code, Guid tenantId, string merchantAccount, string secretName, DateTimeOffset expiresAt, CancellationToken ct)
     {
         await ExecuteWithRetryAsync(async () =>
@@ -212,6 +232,50 @@ public sealed class Db(string connStr)
                 where transactionId = @id;
                 """,
                 new { id, cardHolderName });
+        });
+    }
+
+    public async Task UpdateBillingDetailsAsync(
+        Guid id,
+        string? billingStreet,
+        string? billingHouseNumberOrName,
+        string? billingCity,
+        string? billingStateOrProvince,
+        string? billingPostalCode,
+        string? billingCountry,
+        string? phoneNumber,
+        string? email,
+        CancellationToken ct)
+    {
+        await ExecuteWithRetryAsync(async () =>
+        {
+            using var c = Open();
+            await c.ExecuteAsync(
+                """
+                update transactions
+                set billingstreet = coalesce(@billingStreet, billingstreet),
+                    billinghousenumberorname = coalesce(@billingHouseNumberOrName, billinghousenumberorname),
+                    billingcity = coalesce(@billingCity, billingcity),
+                    billingstateorprovince = coalesce(@billingStateOrProvince, billingstateorprovince),
+                    billingpostalcode = coalesce(@billingPostalCode, billingpostalcode),
+                    billingcountry = coalesce(@billingCountry, billingcountry),
+                    phonenumber = coalesce(@phoneNumber, phonenumber),
+                    email = coalesce(@email, email),
+                    updatedAt = now()
+                where transactionId = @id;
+                """,
+                new
+                {
+                    id,
+                    billingStreet,
+                    billingHouseNumberOrName,
+                    billingCity,
+                    billingStateOrProvince,
+                    billingPostalCode,
+                    billingCountry,
+                    phoneNumber,
+                    email
+                });
         });
     }
 

@@ -181,7 +181,8 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
                 countryCode,
                 paymentMethod = req.PaymentMethod,
                 origin = req.Origin,
-                cardHolderName = req.CardHolderName
+                cardHolderName = req.CardHolderName,
+                billingAddress = req.BillingAddress
             };
 
             _logger.LogInformation("Payload countryCode: {CountryCode}", payload.countryCode);

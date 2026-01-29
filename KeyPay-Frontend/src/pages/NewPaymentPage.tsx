@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getPaymentMethods, cancelPayment } from '@/services/paymentService';
 import AdyenDropin from '@/components/payment/AdyenDropin';
+import AddressStep, { AddressForm } from '@/components/payment/AddressStep';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { formatCurrency } from '@/utils/formatters';
 import { Box, Typography, List, ListItem, ListItemText, TextField, Divider, Alert, Paper, Button, Stack, Backdrop, CircularProgress } from '@mui/material';
@@ -23,6 +24,21 @@ export default function NewPaymentPage() {
   // Hooks must be called unconditionally and before any early returns
   const [holderName, setHolderName] = useState<string>('');
   const [showNameWarning, setShowNameWarning] = useState<boolean>(false);
+  const [step, setStep] = useState<'address' | 'payment'>('address');
+  const [addressForm, setAddressForm] = useState<AddressForm>({
+    firstName: '',
+    lastName: '',
+    address: '',
+    addressContinued: '',
+    city: '',
+    state: '',
+    zip: '',
+    phoneNumber: '',
+    emailAddress: '',
+    isInternational: false,
+    termsAccepted: false
+  });
+  const [showAddressErrors, setShowAddressErrors] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<boolean>(false);
@@ -74,6 +90,12 @@ export default function NewPaymentPage() {
     }
   }, [data?.cardHolderName]);
 
+  useEffect(() => {
+    if (data?.email && !addressForm.emailAddress) {
+      setAddressForm((prev) => ({ ...prev, emailAddress: data.email || '' }));
+    }
+  }, [data?.email, addressForm.emailAddress]);
+
   // Keep latest total to send (base + surcharge) without changing hooks order
   useEffect(() => {
     if (!data) return;
@@ -110,8 +132,34 @@ export default function NewPaymentPage() {
   const totalToPayMinor = baseTotalMinor + (surchargeMinor || initialSurchargeMinor);
   const holderNameError = !holderName.trim();
   const showError = showNameWarning && holderNameError;
+  const requiredAddressMissing = {
+    firstName: !addressForm.firstName.trim(),
+    lastName: !addressForm.lastName.trim(),
+    address: !addressForm.address.trim(),
+    city: !addressForm.city.trim(),
+    state: !addressForm.state.trim(),
+    zip: !addressForm.zip.trim(),
+    phoneNumber: !addressForm.phoneNumber.trim(),
+    termsAccepted: !addressForm.termsAccepted
+  };
+  const isAddressValid = !Object.values(requiredAddressMissing).some(Boolean);
 
   const existingTransactionId = transactionId as string;
+  const billingAddress = {
+    street: addressForm.address,
+    houseNumberOrName: addressForm.addressContinued,
+    city: addressForm.city,
+    stateOrProvince: addressForm.state,
+    postalCode: addressForm.zip,
+    country: countryCode
+  };
+  const appendHiddenField = (form: HTMLFormElement, name: string, value?: string | null) => {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = name;
+    input.value = value ?? '';
+    form.appendChild(input);
+  };
 
   return (
     <div className="max-w-2xl mx-auto p-6">
@@ -247,121 +295,166 @@ export default function NewPaymentPage() {
         </Paper>
       )}
 
-      <Box mb={2}>
-        <TextField
-          fullWidth
-          required
-          label="Card holder name"
-          placeholder="Enter name as it appears on card"
-          value={holderName}
-          onChange={(e) => setHolderName(e.target.value)}
-          error={showError}
-          helperText={showError ? 'Please enter the card holder name' : ' '}
-        />
-      </Box>
-      <AdyenDropin
-        paymentMethodsResponse={paymentMethods}
-        reference={reference}
-        amount={amount}
-        transactionId={existingTransactionId}
-        getSubmitAmount={() => ({ value: totalToPayMinor, currency: amount.currency })}
-        countryCode={countryCode}
-        clientKey={clientKey}
-        cardHolderName={holderName || undefined}
-        onRequireHolderName={() => setShowNameWarning(true)}
-        onProcessingChange={setProcessing}
-        onFinalResult={(r) => {
-            const rc = (r.resultCode || '').toLowerCase();
-            if (r.provisional) {
-              const qp = new URLSearchParams();
-              if (r.txId) qp.set('transactionId', r.txId);
-              if (r.pspReference) qp.set('pspReference', r.pspReference);
-              if (reference) qp.set('reference', reference);
-              const used = totalToSendMinorRef.current;
-              if (used != null) qp.set('amountMinor', String(used));
-              if (amount?.currency) qp.set('currency', amount.currency);
-              if (r.statusCheckUrl) qp.set('statusCheckUrl', r.statusCheckUrl);
-              navigate(`/payment/success?${qp.toString()}`,
-                { state: {
-                    transactionId: r.txId,
-                    pspReference: r.pspReference,
-                    reference,
-                    amountMinor: used,
-                    currency: amount?.currency,
-                    statusCheckUrl: r.statusCheckUrl
-                  }
+      {step === 'address' && (
+        <>
+          <AddressStep
+            value={addressForm}
+            onChange={setAddressForm}
+            showErrors={showAddressErrors}
+          />
+          <Stack direction="row" justifyContent="flex-end" mt={2}>
+            <Button
+              variant="contained"
+              onClick={() => {
+                setShowAddressErrors(true);
+                if (isAddressValid) {
+                  setStep('payment');
                 }
-              );
-            } else if (rc === 'authorised' || rc === 'authorized') {
-              // Redirect back to legacy system on Authorised
-              if (legacyPostUrl) {
+              }}
+            >
+              Next
+            </Button>
+          </Stack>
+        </>
+      )}
+
+      {step === 'payment' && (
+        <>
+          <Stack direction="row" justifyContent="flex-start" mb={1}>
+            <Button variant="text" onClick={() => setStep('address')}>
+              Back
+            </Button>
+          </Stack>
+          <Box mb={2}>
+            <TextField
+              fullWidth
+              required
+              label="Card holder name"
+              placeholder="Enter name as it appears on card"
+              value={holderName}
+              onChange={(e) => setHolderName(e.target.value)}
+              error={showError}
+              helperText={showError ? 'Please enter the card holder name' : ' '}
+            />
+          </Box>
+          <AdyenDropin
+            paymentMethodsResponse={paymentMethods}
+            reference={reference}
+            amount={amount}
+            transactionId={existingTransactionId}
+            getSubmitAmount={() => ({ value: totalToPayMinor, currency: amount.currency })}
+            countryCode={countryCode}
+            clientKey={clientKey}
+            cardHolderName={holderName || undefined}
+            billingAddress={billingAddress}
+            phoneNumber={addressForm.phoneNumber}
+            email={addressForm.emailAddress}
+            onRequireHolderName={() => setShowNameWarning(true)}
+            onProcessingChange={setProcessing}
+            onFinalResult={(r) => {
+              const rc = (r.resultCode || '').toLowerCase();
+              if (r.provisional) {
+                const qp = new URLSearchParams();
+                if (r.txId) qp.set('transactionId', r.txId);
+                if (r.pspReference) qp.set('pspReference', r.pspReference);
+                if (reference) qp.set('reference', reference);
                 const used = totalToSendMinorRef.current;
-                const totalMinor = used != null ? used : (amount?.value ?? 0);
-                const surAmt = (data as any)?.surcharge?.amount ?? 0;
-                const inputVal = [
-                  'Authorised',
-                  reference,
-                  r.txId || existingTransactionId,
-                  r.pspReference || '',
-                  String(totalMinor),
-                  amount?.currency,
-                  String(surAmt),
-                  new Date().toISOString()
-                ].join('|');
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = legacyPostUrl;
-                form.style.display = 'none';
-                const input = document.createElement('input');
-                input.type = 'hidden';
-                input.name = 'payload';
-                input.value = inputVal;
-                form.appendChild(input);
-                // add explicit fields for downstream parsing
-                const pmType = document.createElement('input');
-                pmType.type = 'hidden';
-                pmType.name = 'paymentMethodType';
-                pmType.value = (r as any)?.paymentMethodType || '';
-                form.appendChild(pmType);
-                const pmBrand = document.createElement('input');
-                pmBrand.type = 'hidden';
-                pmBrand.name = 'paymentMethodBrand';
-                pmBrand.value = (r as any)?.paymentMethodBrand || '';
-                form.appendChild(pmBrand);
-                const chnInput = document.createElement('input');
-                chnInput.type = 'hidden';
-                chnInput.name = 'cardHolderName';
-                chnInput.value = (r as any)?.cardHolderName || holderName || '';
-                form.appendChild(chnInput);
-                document.body.appendChild(form);
-                form.submit();
-                return;
+                if (used != null) qp.set('amountMinor', String(used));
+                if (amount?.currency) qp.set('currency', amount.currency);
+                if (r.statusCheckUrl) qp.set('statusCheckUrl', r.statusCheckUrl);
+                navigate(`/payment/success?${qp.toString()}`,
+                  { state: {
+                      transactionId: r.txId,
+                      pspReference: r.pspReference,
+                      reference,
+                      amountMinor: used,
+                      currency: amount?.currency,
+                      statusCheckUrl: r.statusCheckUrl
+                    }
+                  }
+                );
+              } else if (rc === 'authorised' || rc === 'authorized') {
+                // Redirect back to legacy system on Authorised
+                if (legacyPostUrl) {
+                  const used = totalToSendMinorRef.current;
+                  const totalMinor = used != null ? used : (amount?.value ?? 0);
+                  const surAmt = (data as any)?.surcharge?.amount ?? 0;
+                  const inputVal = [
+                    'Authorised',
+                    reference,
+                    r.txId || existingTransactionId,
+                    r.pspReference || '',
+                    String(totalMinor),
+                    amount?.currency,
+                    String(surAmt),
+                    new Date().toISOString()
+                  ].join('|');
+                  const form = document.createElement('form');
+                  form.method = 'POST';
+                  form.action = legacyPostUrl;
+                  form.style.display = 'none';
+                  const input = document.createElement('input');
+                  input.type = 'hidden';
+                  input.name = 'payload';
+                  input.value = inputVal;
+                  form.appendChild(input);
+                  // add explicit fields for downstream parsing
+                  const pmType = document.createElement('input');
+                  pmType.type = 'hidden';
+                  pmType.name = 'paymentMethodType';
+                  pmType.value = (r as any)?.paymentMethodType || '';
+                  form.appendChild(pmType);
+                  const pmBrand = document.createElement('input');
+                  pmBrand.type = 'hidden';
+                  pmBrand.name = 'paymentMethodBrand';
+                  pmBrand.value = (r as any)?.paymentMethodBrand || '';
+                  form.appendChild(pmBrand);
+                  const chnInput = document.createElement('input');
+                  chnInput.type = 'hidden';
+                  chnInput.name = 'cardHolderName';
+                  chnInput.value = (r as any)?.cardHolderName || holderName || '';
+                  form.appendChild(chnInput);
+                  appendHiddenField(form, 'firstName', addressForm.firstName);
+                  appendHiddenField(form, 'lastName', addressForm.lastName);
+                  appendHiddenField(form, 'address', addressForm.address);
+                  appendHiddenField(form, 'addressContinued', addressForm.addressContinued);
+                  appendHiddenField(form, 'city', addressForm.city);
+                  appendHiddenField(form, 'state', addressForm.state);
+                  appendHiddenField(form, 'zip', addressForm.zip);
+                  appendHiddenField(form, 'phoneNumber', addressForm.phoneNumber);
+                  appendHiddenField(form, 'emailAddress', addressForm.emailAddress);
+                  appendHiddenField(form, 'isInternational', addressForm.isInternational ? 'true' : 'false');
+                  document.body.appendChild(form);
+                  form.submit();
+                  return;
+                }
+                // Fallback to internal success page if no legacyPostUrl
+                const qp = new URLSearchParams();
+                if (r.txId) qp.set('transactionId', r.txId);
+                if (r.pspReference) qp.set('pspReference', r.pspReference);
+                if (reference) qp.set('reference', reference);
+                const used = totalToSendMinorRef.current;
+                if (used != null) qp.set('amountMinor', String(used));
+                if (amount?.currency) qp.set('currency', amount.currency);
+                const qs = qp.toString();
+                navigate(`/payment/success${qs ? `?${qs}` : ''}`, { state: { transactionId: r.txId, pspReference: r.pspReference, reference, amountMinor: used, currency: amount?.currency } });
+              } else {
+                const qp = new URLSearchParams();
+                if (r.txId) qp.set('transactionId', r.txId);
+                if (reference) qp.set('reference', reference);
+                navigate(`/payment/error?reason=${encodeURIComponent(rc || 'refused')}&${qp.toString()}`);
               }
-              // Fallback to internal success page if no legacyPostUrl
+            }}
+            onError={(e) => {
+              console.error('Adyen error', e);
               const qp = new URLSearchParams();
-              if (r.txId) qp.set('transactionId', r.txId);
-              if (r.pspReference) qp.set('pspReference', r.pspReference);
+              if (existingTransactionId) qp.set('transactionId', existingTransactionId);
               if (reference) qp.set('reference', reference);
-              const used = totalToSendMinorRef.current;
-              if (used != null) qp.set('amountMinor', String(used));
-              if (amount?.currency) qp.set('currency', amount.currency);
-              const qs = qp.toString();
-              navigate(`/payment/success${qs ? `?${qs}` : ''}`, { state: { transactionId: r.txId, pspReference: r.pspReference, reference, amountMinor: used, currency: amount?.currency } });
-            } else {
-              const qp = new URLSearchParams();
-              if (r.txId) qp.set('transactionId', r.txId);
-              if (reference) qp.set('reference', reference);
-              navigate(`/payment/error?reason=${encodeURIComponent(rc || 'refused')}&${qp.toString()}`);
-            }
-        }}
-        onError={(e) => {
-            console.error('Adyen error', e);
-            const qp = new URLSearchParams();
-            if (existingTransactionId) qp.set('transactionId', existingTransactionId);
-            if (reference) qp.set('reference', reference);
-            navigate(`/payment/error?reason=failed${qp.toString() ? `&${qp.toString()}` : ''}`);
-        }}
-      />
+              navigate(`/payment/error?reason=failed${qp.toString() ? `&${qp.toString()}` : ''}`);
+            }}
+          />
+        </>
+      )}
     </div>
   );
 }

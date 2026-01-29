@@ -23,6 +23,19 @@ export interface CreatePaymentRequest {
   returnUrl: string;
   paymentMethod: any; // Adyen encrypted blob as object
   country?: string;
+  cardHolderName?: string;
+  billingAddress?: BillingAddress;
+  phoneNumber?: string;
+  email?: string;
+}
+
+export interface BillingAddress {
+  street?: string;
+  houseNumberOrName?: string;
+  city?: string;
+  stateOrProvince?: string;
+  postalCode?: string;
+  country?: string;
 }
 
 export interface CreatePaymentResponse {
