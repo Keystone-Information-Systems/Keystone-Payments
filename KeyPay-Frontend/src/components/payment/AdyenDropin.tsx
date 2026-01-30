@@ -110,12 +110,16 @@ export default function AdyenDropin({
               }
               try { onProcessingChange?.(true); } catch {}
               let submitAmount = getSubmitAmount?.() ?? amt;
+              const paymentMethod = {
+                ...(state.data?.paymentMethod ?? {}),
+                holderName: holderNameRef.current
+              };
               const res = await createPayment({
                 reference: ref,
                 amount: submitAmount,
                 countryCode: cc,
                 returnUrl: `${window.location.origin}/payment/result`,
-                paymentMethod: state.data.paymentMethod,
+                paymentMethod,
                 cardHolderName: holderNameRef.current,
                 billingAddress: billingAddressRef.current,
                 phoneNumber: phoneNumberRef.current,
