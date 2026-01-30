@@ -48,7 +48,7 @@ public record BillingAddress(
     [property: JsonPropertyName("postalCode")] string? PostalCode = null,
     [property: JsonPropertyName("country")] string? Country = null);
 
-public record CreatePaymentResponse(string ResultCode, string? PspReference, object? Action, object Raw);
+public record CreatePaymentResponse(string ResultCode, string? PspReference, object? Action, object Raw, string? CardSummary = null);
 
 public record CostEstimateRequest(
     [property: JsonPropertyName("reference")] string Reference,

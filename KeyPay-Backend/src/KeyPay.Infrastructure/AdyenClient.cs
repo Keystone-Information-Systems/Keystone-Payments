@@ -211,6 +211,13 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
 
             var resultCode = root.TryGetProperty("resultCode", out var rc) ? rc.GetString() ?? "Unknown" : "Unknown";
             var psp = root.TryGetProperty("pspReference", out var pr) ? pr.GetString() : null;
+            string? cardSummary = null;
+            if (root.TryGetProperty("additionalData", out var additionalData) &&
+                additionalData.ValueKind == JsonValueKind.Object &&
+                additionalData.TryGetProperty("cardSummary", out var cs))
+            {
+                cardSummary = cs.GetString();
+            }
 
             object? action = null;
             if (root.TryGetProperty("action", out var act))
@@ -219,7 +226,7 @@ public sealed class AdyenClient(HttpClient http, IConfiguration cfg, ILogger<Ady
             }
 
             _logger.LogInformation("Payment result {ResultCode}, psp {PSP}", resultCode, psp);
-            return new CreatePaymentResponse(resultCode, psp, action, root.GetRawText());
+            return new CreatePaymentResponse(resultCode, psp, action, root.GetRawText(), cardSummary);
         }
         catch (Exception ex)
         {

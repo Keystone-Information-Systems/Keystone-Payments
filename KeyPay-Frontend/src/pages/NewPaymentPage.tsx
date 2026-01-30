@@ -414,6 +414,7 @@ export default function NewPaymentPage() {
                   chnInput.name = 'cardHolderName';
                   chnInput.value = (r as any)?.cardHolderName || holderName || '';
                   form.appendChild(chnInput);
+                  appendHiddenField(form, 'cardSummary', (r as any)?.cardSummary);
                   appendHiddenField(form, 'firstName', addressForm.firstName);
                   appendHiddenField(form, 'lastName', addressForm.lastName);
                   appendHiddenField(form, 'address', addressForm.address);

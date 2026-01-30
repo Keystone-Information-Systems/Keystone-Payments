@@ -25,7 +25,7 @@ type Props = {
   phoneNumber?: string;
   email?: string;
   onRequireHolderName?: () => void;
-  onFinalResult: (r: { resultCode?: string; pspReference?: string; txId?: string; provisional?: boolean; statusCheckUrl?: string; paymentMethodType?: string; paymentMethodBrand?: string; cardHolderName?: string }) => void;
+  onFinalResult: (r: { resultCode?: string; pspReference?: string; txId?: string; provisional?: boolean; statusCheckUrl?: string; paymentMethodType?: string; paymentMethodBrand?: string; cardHolderName?: string; cardSummary?: string }) => void;
   onError: (e: any) => void;
   onProcessingChange?: (processing: boolean) => void;
 };
@@ -136,6 +136,7 @@ export default function AdyenDropin({
                   txId: (res as any).txId,
                   provisional: (res as any).provisional,
                   statusCheckUrl: (res as any).statusCheckUrl,
+                  cardSummary: (res as any).cardSummary,
                   paymentMethodType: selectedPaymentMethodTypeRef.current,
                   paymentMethodBrand: selectedPaymentMethodBrandRef.current,
                   cardHolderName: holderNameRef.current
@@ -158,7 +159,7 @@ export default function AdyenDropin({
               if (res.action) {
                 dropinInstance?.handleAction(res.action);
               } else {
-                onFinalResult({ resultCode: res.resultCode, pspReference: res.pspReference, txId: (res as any).txId });
+                onFinalResult({ resultCode: res.resultCode, pspReference: res.pspReference, txId: (res as any).txId, cardSummary: (res as any)?.additionalData?.cardSummary });
               }
             } catch (e) {
               onError(e);

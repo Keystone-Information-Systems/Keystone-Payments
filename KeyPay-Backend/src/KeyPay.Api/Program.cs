@@ -959,7 +959,7 @@ app.MapPost("/api/payments", async (
 
         object response = res.Action is not null
             ? new { txId, action = res.Action, statusCheckUrl }
-            : new { txId, resultCode = res.ResultCode, pspReference = res.PspReference, refusalReason = mappedRefusalReason, provisional, statusCheckUrl };
+            : new { txId, resultCode = res.ResultCode, pspReference = res.PspReference, refusalReason = mappedRefusalReason, cardSummary = res.CardSummary, provisional, statusCheckUrl };
 
         // Cache response
         await idempotency.StoreKeyAsync(idempotencyKey, System.Text.Json.JsonSerializer.Serialize(response), ct);

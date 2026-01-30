@@ -32,7 +32,8 @@ export const schemas = {
     txId: z.string().optional(),
     action: z.any().optional(),
     provisional: z.boolean().optional(),
-    statusCheckUrl: z.union([z.string().url(), z.string().regex(/^\/.*/)]).optional()
+    statusCheckUrl: z.union([z.string().url(), z.string().regex(/^\/.*/)]).optional(),
+    cardSummary: z.string().optional()
   }),
   detailsRes: z.object({
     resultCode: z.string().optional(),
