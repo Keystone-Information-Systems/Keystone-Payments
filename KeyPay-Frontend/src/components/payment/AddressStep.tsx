@@ -11,7 +11,6 @@ export type AddressForm = {
   zip: string;
   phoneNumber: string;
   emailAddress: string;
-  isInternational: boolean;
   termsAccepted: boolean;
 };
 
@@ -31,16 +30,6 @@ export default function AddressStep({ value, onChange, showErrors }: Props) {
   return (
     <Box>
       <Typography variant="h6" mb={1.5}>Payment Details</Typography>
-      <FormControlLabel
-        control={
-          <Checkbox
-            checked={value.isInternational}
-            onChange={(e) => update({ isInternational: e.target.checked })}
-          />
-        }
-        label="Check this if card address is international."
-      />
-
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2, mt: 2 }}>
         <TextField
           required

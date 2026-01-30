@@ -35,7 +35,6 @@ export default function NewPaymentPage() {
     zip: '',
     phoneNumber: '',
     emailAddress: '',
-    isInternational: false,
     termsAccepted: false
   });
   const [showAddressErrors, setShowAddressErrors] = useState(false);
@@ -424,7 +423,6 @@ export default function NewPaymentPage() {
                   appendHiddenField(form, 'zip', addressForm.zip);
                   appendHiddenField(form, 'phoneNumber', addressForm.phoneNumber);
                   appendHiddenField(form, 'emailAddress', addressForm.emailAddress);
-                  appendHiddenField(form, 'isInternational', addressForm.isInternational ? 'true' : 'false');
                   document.body.appendChild(form);
                   form.submit();
                   return;
