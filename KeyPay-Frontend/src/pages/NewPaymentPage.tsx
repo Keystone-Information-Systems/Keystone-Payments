@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getPaymentMethods, cancelPayment } from '@/services/paymentService';
 import AdyenDropin from '@/components/payment/AdyenDropin';
-import AddressStep, { AddressForm } from '@/components/payment/AddressStep';
+import AddressStep, { AddressForm, getAddressValidationErrors } from '@/components/payment/AddressStep';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { formatCurrency } from '@/utils/formatters';
 import { Box, Typography, List, ListItem, ListItemText, TextField, Divider, Alert, Paper, Button, Stack, Backdrop, CircularProgress } from '@mui/material';
@@ -131,17 +131,8 @@ export default function NewPaymentPage() {
   const totalToPayMinor = baseTotalMinor + (surchargeMinor || initialSurchargeMinor);
   const holderNameError = !holderName.trim();
   const showError = showNameWarning && holderNameError;
-  const requiredAddressMissing = {
-    firstName: !addressForm.firstName.trim(),
-    lastName: !addressForm.lastName.trim(),
-    address: !addressForm.address.trim(),
-    city: !addressForm.city.trim(),
-    state: !addressForm.state.trim(),
-    zip: !addressForm.zip.trim(),
-    phoneNumber: !addressForm.phoneNumber.trim(),
-    termsAccepted: !addressForm.termsAccepted
-  };
-  const isAddressValid = !Object.values(requiredAddressMissing).some(Boolean);
+  const addressValidationErrors = getAddressValidationErrors(addressForm);
+  const isAddressValid = !Object.values(addressValidationErrors).some(Boolean);
 
   const existingTransactionId = transactionId as string;
   const billingAddress = {
